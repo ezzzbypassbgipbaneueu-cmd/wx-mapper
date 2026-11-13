@@ -31,7 +31,6 @@ class WxActions(
             val old = field
             field = value.sanitized()
             if (!field.enabled || old.triggerKeyCode != field.triggerKeyCode) {
-                autoClickerToggled = false
                 held.clear()
                 autoClicker.stop()
             }
@@ -41,7 +40,6 @@ class WxActions(
     private var macrosByKey: Map<Int, Macro> = emptyMap()
 
     private val held = HashSet<Int>()
-    private var autoClickerToggled = false
     private var primaryButtonDown = false
 
     fun setMacros(macros: List<Macro>) {
@@ -50,8 +48,8 @@ class WxActions(
     }
 
     /**
-     * RMC (botão direito) funciona como chave liga/desliga: um clique ativa,
-     * outro clique desativa. Para outros gatilhos, mantém o comportamento hold.
+     * O autoclicker funciona enquanto o gatilho estiver pressionado.
+     * Ao receber ACTION_UP, para imediatamente e solta o toque virtual.
      */
     @Synchronized
     fun onTrigger(keyCode: Int, pressed: Boolean): Boolean {
@@ -63,21 +61,11 @@ class WxActions(
         val transition = if (pressed) held.add(keyCode) else held.remove(keyCode)
 
         if (isAuto) {
-            if (config.triggerKeyCode == KEYCODE_RMC) {
-                if (pressed && transition) {
-                    autoClickerToggled = !autoClickerToggled
-                    if (autoClickerToggled && !primaryButtonDown) {
-                        autoClicker.start(config) { clickPosition(config) }
-                    } else {
-                        autoClicker.stop()
-                    }
-                }
-                // A soltura do botão direito não desliga o modo toggle.
-            } else if (pressed) {
+            if (pressed) {
                 if (transition && !primaryButtonDown) {
                     autoClicker.start(config) { clickPosition(config) }
                 }
-            } else {
+            } else if (transition) {
                 autoClicker.stop()
             }
         }
@@ -87,9 +75,9 @@ class WxActions(
     }
 
     /**
-     * O botão esquerdo suspende o autoclicker enquanto está pressionado
-     * (para permitir arrastar/mover a câmera); ao soltar, ele retoma se o
-     * modo toggle continuar ligado.
+     * O botão esquerdo pausa temporariamente o autoclicker para permitir
+     * arrastar/mover a câmera. Ao soltá-lo, retoma apenas se o gatilho
+     * configurado ainda estiver pressionado.
      */
     @Synchronized
     fun onPrimaryButton(pressed: Boolean) {
@@ -98,43 +86,41 @@ class WxActions(
         val config = autoClickerConfig
         if (!config.enabled) return
 
-        if (config.triggerKeyCode == KEYCODE_RMC) {
-            if (autoClickerToggled) {
-                if (pressed) autoClicker.stop()
-                else autoClicker.start(config) { clickPosition(config) }
-            }
-        } else if (pressed && autoClicker.isRunning.value) {
-            autoClicker.stop()
-        } else if (!pressed && held.contains(config.triggerKeyCode)) {
+        if (pressed) {
+            if (autoClicker.isRunning.value) autoClicker.stop()
+        } else if (held.contains(config.triggerKeyCode)) {
             autoClicker.start(config) { clickPosition(config) }
         }
     }
 
-    /** Sincroniza o estado do botão esquerdo caso algum evento de mouse se perca. */
+    /** Reconcilia os botões físicos e recupera ACTION_UP que tenha sido perdido. */
     @Synchronized
     fun syncMouseButtons(buttonState: Int) {
         val primaryNow = buttonState and MotionEvent.BUTTON_PRIMARY != 0
         onPrimaryButton(primaryNow)
 
         val config = autoClickerConfig
-        // O gatilho RMC é toggle: soltar o botão direito não deve pará-lo.
-        if (config.triggerKeyCode == KEYCODE_RMC) return
-
-        val mask = when (config.triggerKeyCode) {
+        val triggerMask = when (config.triggerKeyCode) {
             KEYCODE_LMC -> MotionEvent.BUTTON_PRIMARY
+            KEYCODE_RMC -> MotionEvent.BUTTON_SECONDARY
             KEYCODE_MMC -> MotionEvent.BUTTON_TERTIARY
             else -> return
         }
-        if (buttonState and mask == 0 && held.contains(config.triggerKeyCode)) {
-            held.remove(config.triggerKeyCode)
-            autoClicker.stop()
+
+        if (buttonState and triggerMask == 0) {
+            val wasHeld = held.remove(config.triggerKeyCode)
+            if (wasHeld) autoClicker.stop()
+        } else if (!held.contains(config.triggerKeyCode)) {
+            held.add(config.triggerKeyCode)
+            if (!primaryButtonDown) {
+                autoClicker.start(config) { clickPosition(config) }
+            }
         }
     }
 
     @Synchronized
     fun stopAll() {
         held.clear()
-        autoClickerToggled = false
         primaryButtonDown = false
         autoClicker.stop()
         macroPlayer.stop()
