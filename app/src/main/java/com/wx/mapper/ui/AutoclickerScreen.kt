@@ -100,7 +100,7 @@ fun AutoclickerScreen(
             }
 
             GlassCard {
-                Text(if (cfg.toggleMode) "Botão de ativação (clique para alternar)" else "Botão de ativação (segure para clicar)")
+                Text("Botão de ativação (segure para clicar)")
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     listOf(KEYCODE_LMC to "Esquerdo", KEYCODE_RMC to "Direito", KEYCODE_MMC to "Meio").forEach { (code, label) ->
                         FilterChip(
@@ -109,22 +109,6 @@ fun AutoclickerScreen(
                             label = { Text(label) }
                         )
                     }
-                }
-            }
-
-            GlassCard {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Modo toggle")
-                        Text(
-                            "Clique com o botão direito para ligar/desligar. Segure o esquerdo para pausar; solte para continuar.",
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                    }
-                    Switch(
-                        checked = cfg.toggleMode,
-                        onCheckedChange = { update(cfg.copy(toggleMode = it, triggerKeyCode = KEYCODE_RMC)) }
-                    )
                 }
             }
 

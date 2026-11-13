@@ -92,7 +92,7 @@ class FloatingBubbleService : Service() {
     private val lifecycleOwner = ServiceLifecycleOwner()
 
     private val scope = CoroutineScope(Dispatchers.Main)
-    private var containerView: ComposeView? = null
+    private var containerView: FrameLayout? = null
     private var floatingBubbleView: ComposeView? = null
 
 
@@ -228,18 +228,28 @@ class FloatingBubbleService : Service() {
     @SuppressLint("ClickableViewAccessibility")
     private fun getItemsContainerView(
         onRemove: (Int) -> Unit
-    ): ComposeView {
-        val composeView = ComposeView(this)
-        // Route physical keyboard events through the focused overlay view.
-        // Keep Compose's key-capture controls in charge while the mapper is expanded.
-        composeView.setOnKeyListener { _, _, event ->
-            if (event.action == KeyEvent.ACTION_DOWN || event.action == KeyEvent.ACTION_UP) {
-                if (stateManager.get().isBubbleExpanded.value) false
-                else stateManager.get().onKeyEvent(event)
-            } else {
-                false
+    ): FrameLayout {
+        // Use a focusable ViewGroup as the actual window root. ComposeView is not
+        // a reliable place to intercept hardware dispatch on every Android build.
+        val root = object : FrameLayout(this) {
+            override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+                if (event.action == KeyEvent.ACTION_DOWN || event.action == KeyEvent.ACTION_UP) {
+                    val manager = stateManager.get()
+                    if (!manager.isBubbleExpanded.value && manager.onKeyEvent(event)) {
+                        return true
+                    }
+                }
+                return super.dispatchKeyEvent(event)
             }
         }
+        root.layoutParams = FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT,
+            FrameLayout.LayoutParams.MATCH_PARENT
+        )
+        root.isFocusable = true
+        root.isFocusableInTouchMode = true
+
+        val composeView = ComposeView(this)
         composeView.layoutParams = FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.MATCH_PARENT,
             FrameLayout.LayoutParams.MATCH_PARENT
@@ -253,8 +263,6 @@ class FloatingBubbleService : Service() {
                 val pointerOffset by stateManager.get().pointerOffset.collectAsState()
                 val keysConfig by stateManager.get().keysConfig.collectAsState()
                 Box {
-                    // Opacity 0 is the clean/recording mode: hide both mapped
-                    // controls and the virtual cursor, not only the controls.
                     if (!isBubbleExpanded && itemsContainerOpacity == 0f)
                         return@Box
                     if (!isBubbleExpanded && !isShootingMode) {
@@ -278,19 +286,12 @@ class FloatingBubbleService : Service() {
         }
         composeView.setViewTreeLifecycleOwner(lifecycleOwner)
         composeView.setViewTreeSavedStateRegistryOwner(lifecycleOwner)
-        composeView.isFocusable = true
-        composeView.isClickable = true
-        composeView.isFocusableInTouchMode = true
-        composeView.post {
-            composeView.setOnCapturedPointerListener { _, motionEvent ->
-                stateManager.get().onMouseEvent(motionEvent)
-            }
+        root.addView(composeView)
+        root.setOnCapturedPointerListener { _, motionEvent ->
+            stateManager.get().onMouseEvent(motionEvent)
         }
-        composeView.setOnFocusChangeListener { view, hasFocus ->
+        root.setOnFocusChangeListener { view, hasFocus ->
             if (!hasFocus) {
-                // Ignore transient focus changes caused by pointer capture / overlay
-                // updates. Clear mapped inputs only if the overlay is still unfocused
-                // on the next UI-loop turn.
                 view.post {
                     if (!stateManager.get().isBubbleExpanded.value && !view.hasFocus()) {
                         stateManager.get().onFocusLost()
@@ -300,9 +301,8 @@ class FloatingBubbleService : Service() {
                 }
             }
         }
-        return composeView
+        return root
     }
-
 
     override fun onBind(p0: Intent?): IBinder? {
         return null

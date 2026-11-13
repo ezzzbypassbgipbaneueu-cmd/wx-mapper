@@ -30,7 +30,7 @@ class WxActions(
         set(value) {
             val old = field
             field = value.sanitized()
-            if (!field.enabled || old.triggerKeyCode != field.triggerKeyCode || old.toggleMode != field.toggleMode) {
+            if (!field.enabled || old.triggerKeyCode != field.triggerKeyCode) {
                 held.clear()
                 autoClicker.stop()
             }
@@ -41,7 +41,6 @@ class WxActions(
 
     private val held = HashSet<Int>()
     private var primaryButtonDown = false
-    private var toggleActive = false
 
     fun setMacros(macros: List<Macro>) {
         macrosByKey = macros.filter { it.triggerKeyCode != null }
@@ -62,17 +61,7 @@ class WxActions(
         val transition = if (pressed) held.add(keyCode) else held.remove(keyCode)
 
         if (isAuto) {
-            if (config.toggleMode) {
-                // Um ACTION_DOWN alterna; ACTION_UP não desfaz o estado.
-                if (pressed && transition) {
-                    toggleActive = !toggleActive
-                    if (toggleActive && !primaryButtonDown) {
-                        autoClicker.start(config) { clickPosition(config) }
-                    } else {
-                        autoClicker.stop()
-                    }
-                }
-            } else if (pressed) {
+            if (pressed) {
                 if (transition && !primaryButtonDown) {
                     autoClicker.start(config) { clickPosition(config) }
                 }
@@ -99,7 +88,7 @@ class WxActions(
 
         if (pressed) {
             if (autoClicker.isRunning.value) autoClicker.stop()
-        } else if ((config.toggleMode && toggleActive) || (!config.toggleMode && held.contains(config.triggerKeyCode))) {
+        } else if (held.contains(config.triggerKeyCode)) {
             autoClicker.start(config) { clickPosition(config) }
         }
     }
@@ -118,11 +107,7 @@ class WxActions(
             else -> return
         }
 
-        if (config.toggleMode) {
-            // O clique (ACTION_BUTTON_PRESS) é tratado em onTrigger; o estado
-            // permanece ativo mesmo depois de soltar o botão direito.
-            return
-        } else if (buttonState and triggerMask == 0) {
+        if (buttonState and triggerMask == 0) {
             val wasHeld = held.remove(config.triggerKeyCode)
             if (wasHeld) autoClicker.stop()
         } else if (!held.contains(config.triggerKeyCode)) {
@@ -137,7 +122,6 @@ class WxActions(
     fun stopAll() {
         held.clear()
         primaryButtonDown = false
-        toggleActive = false
         autoClicker.stop()
         macroPlayer.stop()
     }
