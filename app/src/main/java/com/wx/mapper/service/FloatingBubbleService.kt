@@ -432,6 +432,7 @@ class FloatingBubbleService : Service() {
                         }) {
                     val pointerSensitivity by stateManager.get().pointerSensitivity.collectAsState()
                     val overlayOpacity by stateManager.get().overlayOpacity.collectAsState()
+                    val keysConfig by stateManager.get().keysConfig.collectAsState()
                     SettingsLayout(
                         pointerSensitivity = pointerSensitivity,
                         overlayOpacity = overlayOpacity,
