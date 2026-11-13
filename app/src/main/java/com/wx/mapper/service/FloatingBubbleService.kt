@@ -4,7 +4,6 @@ import android.annotation.SuppressLint
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
-import android.content.Context
 import android.content.Intent
 import android.graphics.PixelFormat
 import android.os.IBinder
@@ -75,18 +74,6 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 import kotlin.math.roundToInt
 
-
-private class KeyRoutingComposeView(
-    context: Context,
-    private val routeKeyEvent: (KeyEvent) -> Boolean
-) : ComposeView(context) {
-    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        if (event.action == KeyEvent.ACTION_DOWN || event.action == KeyEvent.ACTION_UP) {
-            if (routeKeyEvent(event)) return true
-        }
-        return super.dispatchKeyEvent(event)
-    }
-}
 
 @AndroidEntryPoint
 class FloatingBubbleService : Service() {
@@ -242,11 +229,16 @@ class FloatingBubbleService : Service() {
     private fun getItemsContainerView(
         onRemove: (Int) -> Unit
     ): ComposeView {
-        val composeView = KeyRoutingComposeView(this) { event ->
-            // While editing, Compose's key-capture fields keep priority.
-            // During gameplay, route physical key DOWN/UP directly to the mapper.
-            if (stateManager.get().isBubbleExpanded.value) false
-            else stateManager.get().onKeyEvent(event)
+        val composeView = ComposeView(this)
+        // Route physical keyboard events through the focused overlay view.
+        // Keep Compose's key-capture controls in charge while the mapper is expanded.
+        composeView.setOnKeyListener { _, _, event ->
+            if (event.action == KeyEvent.ACTION_DOWN || event.action == KeyEvent.ACTION_UP) {
+                if (stateManager.get().isBubbleExpanded.value) false
+                else stateManager.get().onKeyEvent(event)
+            } else {
+                false
+            }
         }
         composeView.layoutParams = FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.MATCH_PARENT,
