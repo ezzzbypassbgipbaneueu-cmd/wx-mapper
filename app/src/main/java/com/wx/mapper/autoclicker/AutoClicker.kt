@@ -21,7 +21,7 @@ const val AUTOCLICKER_POINTER_ID = 20
 class AutoClicker(
     private val scope: CoroutineScope,
     private val injector: EventInjector,
-    private val pointerId: Int = AUTOCLICK_POINTER_ID,
+    private val pointerId: Int = AUTOCLICKER_POINTER_ID,
 ) {
     private var job: Job? = null
     private val _running = MutableStateFlow(false)
