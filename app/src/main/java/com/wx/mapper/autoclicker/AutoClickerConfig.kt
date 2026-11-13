@@ -19,6 +19,8 @@ data class AutoClickerConfig(
     val cps: Float = DEFAULT_CPS,
     /** Botão do mouse (KEYCODE_LMC/RMC/MMC) ou tecla que ativa o autoclicker enquanto pressionado. */
     val triggerKeyCode: Int = KEYCODE_RMC,
+    /** No modo toggle, um clique no gatilho alterna ligado/desligado. */
+    val toggleMode: Boolean = false,
     val positionMode: ClickPositionMode = ClickPositionMode.FOLLOW_POINTER,
     val fixedX: Float = 0f,
     val fixedY: Float = 0f,

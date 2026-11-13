@@ -87,8 +87,10 @@ abstract class EventInjectorImpl(private val eventManager: EventManager = EventM
     }
 
     override fun injectPointer(pointerID: Int, o1: Offset, o2: Offset) {
-        val x = (o1.x.toInt()..o2.x.toInt()).random().toFloat()
-        val y = (o1.y.toInt()..o2.y.toInt()).random().toFloat()
+        // Mapeamentos representam um alvo, não uma área aleatória. Usar o centro
+        // evita que o toque varie a cada acionamento e melhora a precisão.
+        val x = (o1.x + o2.x) / 2f
+        val y = (o1.y + o2.y) / 2f
         addEventDown(pointerID, x, y)
     }
 
