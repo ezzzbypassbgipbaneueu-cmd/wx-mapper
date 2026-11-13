@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.content.res.Resources
 import android.os.Build
+import android.util.DisplayMetrics
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.WindowManager
@@ -17,12 +18,16 @@ import com.wx.mapper.model.DraggableItem
 import com.wx.mapper.model.DraggableItemType
 import com.wx.mapper.domain.EventHandler
 import com.wx.mapper.input.WxRuntime
+import com.wx.mapper.service.TypingState
 import com.wx.mapper.data.external.ShizukuSystemServerAPi
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.first
@@ -41,16 +46,34 @@ class FloatingWindowStateManager @Inject constructor(
     val windowManager: WindowManager by lazy { context.getSystemService(WindowManager::class.java) }
     private val displayMetrics = context.resources.displayMetrics
 
-    // Use the real display bounds instead of resource metrics, which can describe
-    // the app's compatibility area and leave an unreachable strip on the right.
-    private val screenWidth: Int
-        get() = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
-            windowManager.currentWindowMetrics.bounds.width()
-        else displayMetrics.widthPixels
-    private val screenHeight: Int
-        get() = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
-            windowManager.currentWindowMetrics.bounds.height()
-        else displayMetrics.heightPixels
+    // Tamanho REAL da tela (rotação atual). É o espaço de coordenadas do toque injetado.
+    @Suppress("DEPRECATION")
+    private fun realMetrics(): DisplayMetrics {
+        val m = DisplayMetrics()
+        windowManager.defaultDisplay.getRealMetrics(m)
+        return m
+    }
+    val screenWidthPx: Int
+        get() = realMetrics().widthPixels.takeIf { it > 0 } ?: displayMetrics.widthPixels
+    val screenHeightPx: Int
+        get() = realMetrics().heightPixels.takeIf { it > 0 } ?: displayMetrics.heightPixels
+
+    /**
+     * Canto superior esquerdo da janela do overlay NA TELA. Se o sistema desloca a janela
+     * (notch, barra de navegação), o cursor desenhado e os botões ficam deslocados em relação
+     * ao toque injetado: era o "clique um pouco mais pra esquerda" e a "parede" na direita.
+     */
+    private val _windowOrigin = MutableStateFlow(Offset.Zero)
+    val windowOrigin = _windowOrigin.asStateFlow()
+
+    fun onOverlayWindowPositioned(x: Int, y: Int) {
+        val origin = Offset(x.toFloat(), y.toFloat())
+        if (origin == _windowOrigin.value) return
+        _windowOrigin.value = origin
+        eventHandler.windowOrigin = origin
+        // reaplica o mapeamento com a origem nova
+        if (!_isBubbleExpanded.value) eventHandler.updateKeyMapping(containerItems.value)
+    }
 
     val pointerSensitivity = MutableStateFlow(0.5f)
     val overlayOpacity = MutableStateFlow(0.5f)
@@ -65,8 +88,25 @@ class FloatingWindowStateManager @Inject constructor(
     val isBubbleExpanded = _isBubbleExpanded.asStateFlow()
 
     private val _mousePointerOffset =
-        MutableStateFlow(Offset(screenWidth / 2f, screenHeight / 2f))
+        MutableStateFlow(Offset(screenWidthPx / 2f, screenHeightPx / 2f))
     val pointerOffset = _mousePointerOffset.asStateFlow()
+
+    /** Modo gravação: esconde TUDO do keymapper (botões, cursor e bolha). O mapeamento continua. */
+    val recordingMode = MutableStateFlow(false)
+
+    // Modo digitar: o overlay larga o foco do teclado para o app/jogo de baixo.
+    private val manualTyping = MutableStateFlow(false)
+    private val autoTypingSuppressed = MutableStateFlow(false)
+    val isTypingMode by lazy {
+        combine(
+            manualTyping,
+            TypingState.editableFocused,
+            autoTypingSuppressed,
+            _appConfig
+        ) { manual, editable, suppressed, config ->
+            manual || (config.autoTypingMode && editable && !suppressed)
+        }.stateIn(scope, SharingStarted.Eagerly, false)
+    }
 
     private val _containerItems = MutableStateFlow(listOf<DraggableItem>())
     val containerItems = _containerItems.asStateFlow()
@@ -90,6 +130,11 @@ class FloatingWindowStateManager @Inject constructor(
             }
         }
         scope.launch {
+            TypingState.editableFocused.collect { focused ->
+                if (!focused) autoTypingSuppressed.value = false
+            }
+        }
+        scope.launch {
             // Mudanças feitas nas telas (autoclicker/macros) valem na hora, sem reiniciar o overlay.
             dataStoreManager.getKeyConfig(DataStoreManager.KEYS_CONFIG).drop(1).collect {
                 val previous = _appConfig.value
@@ -99,7 +144,10 @@ class FloatingWindowStateManager @Inject constructor(
                     cursorStyle = it.cursorStyle,
                     cursorSizeDp = it.cursorSizeDp,
                     cursorColor = it.cursorColor,
-                    cursorOpacity = it.cursorOpacity
+                    cursorOpacity = it.cursorOpacity,
+                    cursorImagePath = it.cursorImagePath,
+                    cursorImageVersion = it.cursorImageVersion,
+                    cursorImageHotspotCenter = it.cursorImageHotspotCenter
                 )
                 if (previousWithoutCursor != it) {
                     eventHandler.appConfig = it
@@ -196,11 +244,39 @@ class FloatingWindowStateManager @Inject constructor(
     fun onKeyEvent(keyEvent: KeyEvent): Boolean {
         if (_isBubbleExpanded.value)
             return false
+        if (isTypingMode.value)
+            return false
+        val config = _appConfig.value
+        if (keyEvent.keyCode == config.recordingModeKeyCode) {
+            if (keyEvent.action == KeyEvent.ACTION_DOWN && keyEvent.repeatCount == 0) toggleRecordingMode()
+            return true
+        }
+        if (keyEvent.keyCode == config.typingModeKeyCode) {
+            if (keyEvent.action == KeyEvent.ACTION_DOWN && keyEvent.repeatCount == 0) setManualTyping(true)
+            return true
+        }
         return eventHandler.handleKeyEvent(keyEvent)
     }
 
+    fun toggleRecordingMode() {
+        recordingMode.value = !recordingMode.value
+        eventHandler.clear()
+    }
+
+    fun setManualTyping(enabled: Boolean) {
+        manualTyping.value = enabled
+        eventHandler.clear()
+    }
+
+    /** Toque na bolha enquanto digita: volta ao mapeamento. */
+    fun exitTypingMode() {
+        manualTyping.value = false
+        if (TypingState.editableFocused.value) autoTypingSuppressed.value = true
+        eventHandler.clear()
+    }
+
     fun onMouseEvent(motionEvent: MotionEvent): Boolean {
-        if (isBubbleExpanded.value)
+        if (isBubbleExpanded.value || isTypingMode.value)
             return false
         eventHandler.wx.syncMouseButtons(motionEvent.buttonState)
         when (motionEvent.action) {
@@ -228,11 +304,11 @@ class FloatingWindowStateManager @Inject constructor(
                     val newPosition = Offset(
                         (oldPosition.x + delta.x).coerceIn(
                             0f,
-                            (screenWidth - 1).coerceAtLeast(0).toFloat()
+                            (screenWidthPx - 1).coerceAtLeast(0).toFloat()
                         ),
                         (oldPosition.y + delta.y).coerceIn(
                             0f,
-                            (screenHeight - 1).coerceAtLeast(0).toFloat()
+                            (screenHeightPx - 1).coerceAtLeast(0).toFloat()
                         )
                     )
                     _mousePointerOffset.value = newPosition
@@ -248,6 +324,8 @@ class FloatingWindowStateManager @Inject constructor(
         }
         return true
     }
+
+    fun updateAutoTyping(enabled: Boolean) = updateCursorSettings { copy(autoTypingMode = enabled) }
 
     fun updateCursorStyle(style: CursorStyle) = updateCursorSettings { copy(cursorStyle = style) }
 

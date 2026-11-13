@@ -1,3 +1,5 @@
 <resources>
     <string name="app_name">WX MAPPER</string>
+    <string name="typing_detector_label">WX Mapper - detector de digitação</string>
+    <string name="typing_detector_description">Detecta quando um campo de texto é aberto para liberar o teclado automaticamente (modo digitar). Não lê nem guarda o que você digita.</string>
 </resources>

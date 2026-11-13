@@ -15,443 +15,29 @@ import com.wx.mapper.model.KeyMap
 import com.wx.mapper.model.KeymapType
 import com.wx.mapper.model.MultiModeTouchHandler
 import com.wx.mapper.model.TouchMode
+import com.wx.mapper.model.visualButtonScale
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 
-//class EventHandler(
-//    private val eventInjector: EventInjector
-//) {
-//    private val TAG = "EventHandler"
-//    private var items: Map<Set<Int>, KeyMap> = mapOf()//contains key mappings for keycodes
-//
-//    private var multiModeTouchHandler: MultiModeTouchHandler
-//
-//    private val pressedKeys =
-//        mutableMapOf<Int, Boolean>()
-//    private val pointerIds =
-//        mutableMapOf<Int, Int?>()//contains bindings for keycodes
-//    private val pressedKeysGroup =
-//        mutableMapOf<Int, Boolean>()//separate map because groups(like "wasd" ,cancellable) are registered under a const in $pressedKeys
-//    private val _shootingModeState =
-//        MutableStateFlow<ShootingModeState>(ShootingModeState.Disabled(false))
-//    val isShootingMode = _shootingModeState.map { it is ShootingModeState.Enabled }.stateIn(
-//        scope = CoroutineScope(Dispatchers.Main),
-//        started = SharingStarted.Eagerly,
-//        initialValue = false
-//    )
-//
-//
-//    var mousePointerPosition = Offset.Zero
-//
-//    var appConfig = AppConfig.Default
-//
-//    init {
-//        multiModeTouchHandler = TapModeTouchHandler(eventInjector)
-//    }
-//
-//    fun setTouchMode(touchMode: TouchMode) {
-//        multiModeTouchHandler = when (touchMode) {
-//            TouchMode.TAP -> {
-//                TapModeTouchHandler(eventInjector)
-//            }
-//
-//            TouchMode.HOLD -> {
-//                HoldModeTouchHandler(eventInjector)
-//            }
-//
-//            TouchMode.MIXED -> {
-//                MixedModeTouchHandler(eventInjector)
-//            }
-//        }
-//    }
-//
-//    fun handleKeyEvent(keyEvent: KeyEvent): Boolean {
-//        Log.i(TAG,"key event: $keyEvent")
-//        val keyCode = if (isWASD(keyEvent)) KEYCODE_WASD else keyEvent.keyCode
-//        if (keyCode == appConfig.shootingModeKeyCode){
-//            if (keyEvent.action != MotionEvent.ACTION_DOWN) return true
-//            toggleShootingMode(false)
-//        }
-//        if (pointerIds[keyCode] == null)//no keybinding for $keycode
-//            return false
-//        when (keyEvent.action) {
-//            MotionEvent.ACTION_DOWN -> {
-//                val pointerId = pointerIds[keyCode]!!
-//                if (keyCode == KEYCODE_WASD) {
-//                    if (pressedKeysGroup[keyEvent.keyCode] != true) {
-//                        pressedKeys[keyCode] = true
-//                        processWasdEvent(keyEvent, pointerId)
-//                        pressedKeysGroup[keyEvent.keyCode] = true
-//                    }
-//                    return true
-//                }
-//                if (pressedKeys[keyEvent.keyCode] != true) {
-//                    pressedKeys[keyCode] = true
-//                    processKeyEvent(keyEvent, pointerId)
-//                }
-//                return true
-//            }
-//
-//            MotionEvent.ACTION_UP -> {
-//                if (isWASD(keyEvent)) {
-//                    val pointerId = pointerIds[KEYCODE_WASD]!!
-//                    pressedKeysGroup[keyEvent.keyCode] = false
-//                    processWasdEvent(keyEvent, pointerId)
-//                    pressedKeys[KEYCODE_WASD] = false
-//                    return true
-//                }
-//                val pointerId = pointerIds[keyEvent.keyCode]!!
-//                processKeyEvent(keyEvent, pointerId)
-//                pressedKeys[keyEvent.keyCode] = false
-//                return true
-//            }
-//
-//            else -> {
-//                return false
-//            }
-//        }
-//    }
-//
-//
-//    private fun processKeyEvent(keyEvent: KeyEvent, pointerId: Int) {
-//        if (keyEvent.action == MotionEvent.ACTION_DOWN) {
-//            val itemKey = setOf(keyEvent.keyCode)
-//            items[itemKey]?.let {
-//                if (it.type == KeymapType.CANCELABLE) {
-//                    val isPressed = pressedKeysGroup[keyEvent.keyCode] ?: false
-//                    val keyMap =
-//                        if (isPressed) items[setOf(keyEvent.keyCode, KEYCODE_CANCEL)]!! else it
-//                    multiModeTouchHandler.handleTouchEvent(
-//                        keyEvent,
-//                        isPressed,
-//                        pointerId,
-//                        keyMap
-//                    ).run {
-//                        pressedKeysGroup[keyEvent.keyCode] = this
-//                    }
-//                    toggleShootingMode()
-//                    return
-//                }
-//                eventInjector.injectPointer(pointerId, it.position, it.end!!)
-//            }
-//        } else if (keyEvent.action == MotionEvent.ACTION_UP) {
-//            val itemKey = setOf(keyEvent.keyCode, KEYCODE_CANCEL)
-//            items[itemKey]?.let {
-//                val isPressed = pressedKeysGroup[keyEvent.keyCode] ?: false
-//                multiModeTouchHandler.handleTouchEvent(
-//                    keyEvent,
-//                    isPressed,
-//                    pointerId,
-//                    it
-//                ).let { shouldToggleShootingMode ->
-//                    if (isShootingMode.value == shouldToggleShootingMode) {
-//                        pressedKeysGroup[keyEvent.keyCode] = shouldToggleShootingMode
-//                        toggleShootingMode()
-//                    }
-//                }
-//            } ?: eventInjector.releasePointer(pointerId)
-//        }
-//    }
-//
-//    private fun toggleShootingMode(temp:Boolean=true) {
-//        when (_shootingModeState.value) {
-//            ShootingModeState.Disabled(temp) -> {
-//                _shootingModeState.value = ShootingModeState.Enabled
-//                val key = setOf(appConfig.shootingModeKeyCode)
-//                val pointerId = pointerIds[appConfig.shootingModeKeyCode]
-//                items[key]?.let {
-//                    eventInjector.injectPointer(pointerId!!, it.position)
-//                }
-//            }
-//
-//            ShootingModeState.Enabled -> {
-//                _shootingModeState.value = ShootingModeState.Disabled(temp)
-//                val pointerId = pointerIds[appConfig.shootingModeKeyCode]
-//                eventInjector.releasePointer(pointerId!!)
-//            }
-//
-//            else -> {}
-//        }
-//    }
-//
-//    private fun processWasdEvent(keyEvent: KeyEvent, pointerId: Int) {
-//        if (keyEvent.action == MotionEvent.ACTION_DOWN) {
-//            val itemKey =
-//                getPressedWasdKey()?.let { setOf(it, keyEvent.keyCode) }
-//                    ?: setOf(keyEvent.keyCode)
-//            items[itemKey]?.let {
-//                if (itemKey.size > 1) {
-//                    eventInjector.transFormGesture(pointerId, it.position)
-//                    return
-//                }
-//                it.center?.let { center ->
-//                    eventInjector.injectGesture(
-//                        pointerId,
-//                        center,
-//                        it.position
-//                    )
-//                }
-//            }
-//        } else if (keyEvent.action == MotionEvent.ACTION_UP) {
-//            val pressedWASDKey = getPressedWasdKey()
-//            pressedWASDKey?.let { keyCode ->//check if other keys(W,A,S,D) are pressed
-//                items[setOf(keyCode)]?.let {
-//                    eventInjector.transFormGesture(pointerId, it.position)
-//                }
-//            } ?: eventInjector.releaseGesture(pointerId)
-//        }
-//    }
-//
-//    private fun getPressedWasdKey(): Int? {
-//        val wasdKeys = listOf(Key.W, Key.A, Key.S, Key.D)
-//
-//        wasdKeys.forEach { iKey ->
-//            if (pressedKeysGroup[iKey.nativeKeyCode] == true) {
-//                return iKey.nativeKeyCode
-//            }
-//        }
-//        return null
-//    }
-//
-//    private fun isWASD(keyEvent: KeyEvent): Boolean {
-//        return when (keyEvent.keyCode) {
-//            Key.W.nativeKeyCode, Key.A.nativeKeyCode, Key.S.nativeKeyCode, Key.D.nativeKeyCode -> {
-//                true
-//            }
-//
-//            else -> false
-//        }
-//    }
-//
-//    fun handleMouseButton(mouseButton: Int, pressed: Boolean):Boolean {
-//        val keyCode = when (mouseButton) {
-//            MotionEvent.BUTTON_PRIMARY -> KEYCODE_LMC
-//
-//            MotionEvent.BUTTON_SECONDARY -> KEYCODE_RMC
-//
-//            MotionEvent.BUTTON_TERTIARY -> KEYCODE_MMC
-//            else -> return false
-//        }
-//       return when (keyCode) {
-//            KEYCODE_LMC, appConfig.fireKeyCode -> {
-//                if (!isShootingMode.value) {
-//                    simulateNativeClick(KEYCODE_LMC, pressed)
-//                    return true
-//                }
-//                if (KEYCODE_LMC!= appConfig.fireKeyCode) return false
-//                val pointerId = pointerIds[KEYCODE_LMC] ?: return false
-//                if (pressed) {
-//                    val itemKey = setOf(KEYCODE_LMC)
-//                    items[itemKey]?.let {
-//                        eventInjector.injectPointer(pointerId, it.position, it.end!!)
-//                    }
-//                } else {
-//                    eventInjector.releasePointer(pointerId)
-//                }
-//                true
-//            }
-//
-//            appConfig.shootingModeKeyCode -> {
-//                if (!pressed)
-//                    return true
-//                toggleShootingMode(false)
-//
-////                val itemKey = setOf(appConfig.shootingModeKeyCode)
-////                if (items[itemKey] == null)
-////                    return false
-////                val pointerId = pointerIds[appConfig.shootingModeKeyCode]?:return false
-////                if (isShootingMode.value) {
-////                    eventInjector.releasePointer(pointerId)
-////                    _shootingModeState.value = ShootingModeState.Disabled(false)
-////                } else {
-////                    items[itemKey]?.let {
-////                        eventInjector.injectPointer(pointerId, it.position, it.end!!)
-////                    }
-////                    _shootingModeState.value = ShootingModeState.Enabled
-////                }
-////                true
-//                true
-//            }
-//
-//            KEYCODE_RMC,appConfig.scopeKeyCode -> {
-//                if (isShootingMode.value) {
-//                    val pointerId = pointerIds[KEYCODE_RMC] ?: return false
-//                    if (pressed) {
-//                        val itemKey = setOf(KEYCODE_RMC)
-//                        items[itemKey]?.let {
-//                            eventInjector.injectPointer(pointerId, it.position, it.end!!)
-//                        }
-//                    } else {
-//                        eventInjector.releasePointer(pointerId)
-//                    }
-//                }
-//                true
-//            }
-//
-//           else -> false
-//       }
-//    }
-//
-//
-//    fun handlePointerMove(position: Offset): Boolean {
-//        if (!isShootingMode.value) {
-//            val pointerId = pointerIds[KEYCODE_LMC]!!
-//            eventInjector.updatePointerPosition(
-//                pointerID = pointerId,
-//                position
-//            )//update the position of visible mouse pressed pointer
-//            return true
-//        }
-//        val pointerId = pointerIds[appConfig.shootingModeKeyCode]
-//        pointerId?.let {
-//            eventInjector.updatePointerPosition(it, position)
-//            return true
-//        } ?: return false
-//    }
-//
-//    private fun simulateNativeClick(keyCode: Int, isPressed: Boolean) {
-//        val pointerId = pointerIds[keyCode]!!
-//        if (isPressed) {
-//            eventInjector.injectPointer(pointerId, mousePointerPosition)
-//        } else {
-//            eventInjector.releasePointer(pointerId)
-//        }
-//    }
-//
-//    fun clear() {
-//        eventInjector.clear()
-//        pressedKeys.clear()
-//        pressedKeysGroup.clear()
-//        _shootingModeState.value = ShootingModeState.Disabled(false)
-//    }
-//
-//    fun updateKeyMapping(items: List<DraggableItem>) {
-//        val map = hashMapOf<Set<Int>, KeyMap>()
-//        pointerIds.clear()
-//        items.forEach {
-//            Log.i(TAG,"adding keymaping for: $it")
-//            when (it) {
-//                is DraggableItem.WASDGroup -> {
-//                    map[setOf(Key.W.nativeKeyCode)] = KeyMap(position = it.w, center = it.center)
-//                    map[setOf(Key.A.nativeKeyCode)] = KeyMap(position = it.a, center = it.center)
-//                    map[setOf(Key.S.nativeKeyCode)] = KeyMap(position = it.s, center = it.center)
-//                    map[setOf(Key.D.nativeKeyCode)] = KeyMap(position = it.d, center = it.center)
-//                    val wd = Offset(
-//                        x = it.w.x + ((it.d.x - it.w.x) / 2),
-//                        y = it.w.y + ((it.d.y - it.w.y) / 2)
-//                    )
-//                    val wa = Offset(
-//                        x = it.w.x - ((it.w.x - it.a.x) / 2),
-//                        y = it.w.y + ((it.a.y - it.w.y) / 2)
-//                    )
-//                    val sd = Offset(
-//                        x = it.s.x + ((it.d.x - it.s.x) / 2),
-//                        y = it.s.y + ((it.d.y - it.s.y) / 2)
-//                    )
-//                    val sa = Offset(
-//                        x = it.a.x + ((it.s.x - it.a.x) / 2),
-//                        y = it.a.y + ((it.s.y - it.a.y) / 2)
-//                    )
-//                    map[setOf(Key.W.nativeKeyCode, Key.A.nativeKeyCode)] =
-//                        KeyMap(position = wa, center = it.center)
-//                    map[setOf(Key.W.nativeKeyCode, Key.D.nativeKeyCode)] =
-//                        KeyMap(position = wd, center = it.center)
-//                    map[setOf(Key.S.nativeKeyCode, Key.D.nativeKeyCode)] =
-//                        KeyMap(position = sd, center = it.center)
-//                    map[setOf(Key.S.nativeKeyCode, Key.A.nativeKeyCode)] =
-//                        KeyMap(position = sa, center = it.center)
-//
-//                    if (!pointerIds.containsKey(KEYCODE_WASD)) {
-//                        pointerIds[KEYCODE_WASD] = pointerIds.size
-//                    }
-//                }
-//
-//                is DraggableItem.VariableKey -> {
-//                    it.keyCode?.let { keyCode ->
-//                        var position =
-//                            it.position
-//                        val shrinkSize =
-//                            it.size / 3f  //shrink the size so that artificial taps can be accurate on circular buttons
-//                        val end =
-//                            position + Offset(x = it.size - shrinkSize, y = it.size - shrinkSize)
-//                        position = Offset(position.x + shrinkSize, position.y + shrinkSize)
-//
-//                        map[setOf(keyCode)] =
-//                            KeyMap(position = position, end = end)
-//                        if (!pointerIds.containsKey(keyCode)) {
-//                            pointerIds[keyCode] = pointerIds.size
-//                        }
-//                    }
-//                }
-//
-//                is DraggableItem.FixedKey -> {
-//                   val keyCode= when(it.type){
-//                        DraggableItemType.SHOOTING_MODE -> appConfig.shootingModeKeyCode
-//                        DraggableItemType.FIRE -> appConfig.fireKeyCode
-//                        DraggableItemType.SCOPE -> appConfig.scopeKeyCode
-//                        else->it.keyCode
-//                    }
-//                    it.apply {
-//                        val shrinkSize =
-//                            size / 3f                                     //shrink the size so that artificial taps can be accurate on circular buttons
-//                        val end = position + Offset(x = size - shrinkSize, y = size - shrinkSize)
-//                        position = Offset(position.x + shrinkSize, position.y + shrinkSize)
-//                        map[setOf(keyCode)] =
-//                            KeyMap(position = position, end = end)
-//                        if (!pointerIds.containsKey(keyCode)) {
-//                            pointerIds[keyCode] = pointerIds.size
-//                        }
-//                    }
-//
-//                }
-//
-//                is DraggableItem.CancelableKey -> {
-//                    if (it.keyCode == null)
-//                        return@forEach
-//                    var position =
-//                        it.position
-//                    var cancelPosition =
-//                        it.cancelPosition
-//                    val shrinkSize =
-//                        it.size / 3f                                     //shrink the size so that artificial taps can be accurate on circular buttons
-//                    val end = position + Offset(x = it.size - shrinkSize, y = it.size - shrinkSize)
-//                    val cancelEnd =
-//                        cancelPosition + Offset(x = it.size - shrinkSize, y = it.size - shrinkSize)
-//                    position = Offset(position.x + shrinkSize, position.y + shrinkSize)
-//                    cancelPosition =
-//                        Offset(cancelPosition.x + shrinkSize, cancelPosition.y + shrinkSize)
-//                    map[setOf(it.keyCode!!)] =
-//                        KeyMap(type = KeymapType.CANCELABLE, position = position, end = end)
-//
-//                    map[setOf(it.keyCode!!, KEYCODE_CANCEL)] =
-//                        KeyMap(
-//                            type = KeymapType.CANCELABLE,
-//                            position = cancelPosition,
-//                            end = cancelEnd
-//                        )
-//                    pointerIds[it.keyCode!!] = pointerIds.size
-//                }
-//            }
-//        }
-//        if (!pointerIds.containsKey(KEYCODE_LMC)) {
-//            pointerIds[KEYCODE_LMC] = pointerIds.size
-//        }
-//        this.items = map
-//    }
-//
-//}
 private const val MASK_W = 1 shl 0
 private const val MASK_A = 1 shl 1
 private const val MASK_S = 1 shl 2
 private const val MASK_D = 1 shl 3
 
-const val KEYCODE_CANCEL = 1 shl 4//cancel button for cancelable components
-
-const val KEYCODE_WASD = 1 shl 5//custom keycode for key groups
+// Códigos "virtuais" (botões do mouse / grupo WASD). Mantidos acima dos keycodes reais do Android
+// (que vão até ~330) e abaixo do tamanho dos arrays (512) para nunca colidirem com uma tecla.
+// ANTES: KEYCODE_WASD = 32 era a própria tecla D, e as máscaras 1/2/4/8 e "tecla | 16" eram
+// usadas como chaves do MESMO mapa das teclas reais (ex.: a tecla "1" = 8 = MASK_D, e para
+// muitas teclas como A/B/C o botão "cancelar" sobrescrevia o próprio botão).
+const val KEYCODE_CANCEL = 450 // legado (não usado como chave de mapa)
+const val KEYCODE_WASD = 500   //pointer slot do grupo WASD
 const val KEYCODE_LMC = 1 shl 6//mouse left click
 const val KEYCODE_RMC = 1 shl 7//mouse right click
 const val KEYCODE_MMC = 1 shl 8//mouse middle click
+
+/** Proporção círculo/caixa medida: KeyCircular mede 66dp (50dp + padding 8dp de cada lado). */
+private const val PADDED_KEY_CIRCLE_RATIO = 50f / 66f
 
 
 private fun keyToWasdMask(keyCode: Int): Int = when (keyCode) {
@@ -468,10 +54,11 @@ class EventHandler(
 
     /* ---------- state ---------- */
 
-    private val keyMap = HashMap<Int, KeyMap>(64)
+    // Três mapas separados (antes era um só, com chaves que colidiam):
+    private val keyMap = HashMap<Int, KeyMap>(64)        // tecla física / botão do mouse
+    private val cancelKeyMap = HashMap<Int, KeyMap>(16)  // posição "cancelar" de teclas cancelables
+    private val wasdMap = HashMap<Int, KeyMap>(16)       // máscara de direções -> alvo do joystick
 
-    // Physical key state is indexed by Android keyCode; mapped state is indexed by our
-    // compact per-key ID. Keeping them separate prevents collisions between the two spaces.
     private val pressedKeys = BooleanArray(512)
     private val mappedPressed = BooleanArray(512)
     private val cancelToggle = BooleanArray(512)
@@ -482,6 +69,14 @@ class EventHandler(
 
     private val keyIdMap = HashMap<Int, Int>(64)
     private var nextKeyId = 0
+
+    /**
+     * Onde a janela do overlay começa na tela. Os botões são posicionados em coordenadas da
+     * janela, mas o toque injetado usa coordenadas da TELA. Se a janela estiver deslocada
+     * (notch/barra), sem essa correção todo toque cai fora do lugar.
+     */
+    @Volatile
+    var windowOrigin: Offset = Offset.Zero
 
 
     @Volatile
@@ -599,13 +194,11 @@ class EventHandler(
         }
 
         // Resolve every combination (including 3 and 4 simultaneous directions).
-        // The old table only contained single directions and a few pairs; when a
-        // third key was pressed, no target existed and the gesture appeared stuck.
-        val target = keyMap[wasdMask] ?: run {
+        val target = wasdMap[wasdMask] ?: run {
             val directionBits = intArrayOf(MASK_W, MASK_A, MASK_S, MASK_D)
             val active = directionBits.filter { bit -> (wasdMask and bit) != 0 }
-            val points = active.mapNotNull { bit -> keyMap[bit]?.position }
-            val center = active.firstNotNullOfOrNull { bit -> keyMap[bit]?.center }
+            val points = active.mapNotNull { bit -> wasdMap[bit]?.position }
+            val center = active.firstNotNullOfOrNull { bit -> wasdMap[bit]?.center }
             if (points.isEmpty()) null
             else {
                 val average = Offset(
@@ -640,8 +233,8 @@ class EventHandler(
             if (it.type == KeymapType.CANCELABLE) {
                 val id = keyId(keyCode)
                 cancelToggle[id] = if (cancelToggle[id]){
-                    keyMap[keyCode or KEYCODE_CANCEL]?.let {
-                        cancelableTouchHandler.handleTouchEvent(KeyEvent(KeyEvent.ACTION_DOWN, keyCode),cancelToggle[id],pointerId,it)
+                    cancelKeyMap[keyCode]?.let { cancelMap ->
+                        cancelableTouchHandler.handleTouchEvent(KeyEvent(KeyEvent.ACTION_DOWN, keyCode),cancelToggle[id],pointerId,cancelMap)
                     }?:false
                 }else{
                     cancelableTouchHandler.handleTouchEvent(KeyEvent(KeyEvent.ACTION_DOWN, keyCode),cancelToggle[id],pointerId,it)
@@ -659,13 +252,12 @@ class EventHandler(
     }
 
     private fun handleKeyUp(keyCode: Int, pointerId: Int) {
-//        val cancelKey = keyCode or KEYCODE_CANCEL
         val id = keyId(keyCode)
         keyMap[keyCode]?.let {
             if (it.type == KeymapType.CANCELABLE){
                 cancelToggle[id] = if (cancelToggle[id]){
-                    keyMap[keyCode or KEYCODE_CANCEL]?.let {
-                        cancelableTouchHandler.handleTouchEvent(KeyEvent(KeyEvent.ACTION_UP, keyCode),cancelToggle[id],pointerId,it)
+                    cancelKeyMap[keyCode]?.let { cancelMap ->
+                        cancelableTouchHandler.handleTouchEvent(KeyEvent(KeyEvent.ACTION_UP, keyCode),cancelToggle[id],pointerId,cancelMap)
                     }?:false
                 }else{
                     cancelableTouchHandler.handleTouchEvent(KeyEvent(KeyEvent.ACTION_UP, keyCode),cancelToggle[id],pointerId,it)
@@ -758,8 +350,23 @@ class EventHandler(
 
     /* ---------- mapping ---------- */
 
+    /**
+     * Área de toque de um botão: pequena região no CENTRO do círculo que o usuário vê.
+     * [topLeft] em coordenadas da janela; [boxSize] é a caixa medida (px, sem escala);
+     * [circleRatio] é quanto dessa caixa é o círculo desenhado.
+     */
+    private fun tapArea(topLeft: Offset, boxSize: Int, circleRatio: Float): Pair<Offset, Offset> {
+        val box = boxSize.toFloat()
+        val center = topLeft + windowOrigin + Offset(box / 2f, box / 2f)
+        val diameter = box * circleRatio * appConfig.visualButtonScale()
+        val half = (diameter * 0.2f).coerceAtLeast(1f)   // 40% do diâmetro, no centro
+        return Offset(center.x - half, center.y - half) to Offset(center.x + half, center.y + half)
+    }
+
     fun updateKeyMapping(items: List<DraggableItem>) {
         keyMap.clear()
+        cancelKeyMap.clear()
+        wasdMap.clear()
         pointerIds.fill(-1)
         pressedKeys.fill(false)
         mappedPressed.fill(false)
@@ -771,17 +378,18 @@ class EventHandler(
         var nextPointer = 0
 
         fun alloc(key: Int) {
-            if (pointerIds[key] == -1)
+            if (key in pointerIds.indices && pointerIds[key] == -1)
                 pointerIds[key] = nextPointer++
         }
 
         items.forEach { item ->
             when (item) {
                 is DraggableItem.WASDGroup -> {
-                    keyMap[MASK_W] = KeyMap(position = item.w, center = item.center)
-                    keyMap[MASK_A] = KeyMap(position = item.a, center = item.center)
-                    keyMap[MASK_S] = KeyMap(position = item.s, center = item.center)
-                    keyMap[MASK_D] = KeyMap(position = item.d, center = item.center)
+                    // w/a/s/d/center já vêm em coordenadas da TELA (positionOnScreen)
+                    wasdMap[MASK_W] = KeyMap(position = item.w, center = item.center)
+                    wasdMap[MASK_A] = KeyMap(position = item.a, center = item.center)
+                    wasdMap[MASK_S] = KeyMap(position = item.s, center = item.center)
+                    wasdMap[MASK_D] = KeyMap(position = item.d, center = item.center)
                     val wa = Offset(
                         x = item.w.x - ((item.w.x - item.a.x) / 2),
                         y = item.w.y + ((item.a.y - item.w.y) / 2)
@@ -798,24 +406,18 @@ class EventHandler(
                         x = item.s.x + ((item.d.x - item.s.x) / 2),
                         y = item.s.y + ((item.d.y - item.s.y) / 2)
                     )
-                    keyMap[MASK_W or MASK_A] = KeyMap(position = wa, center = item.center)
-                    keyMap[MASK_W or MASK_D] = KeyMap(position = wd, center = item.center)
-                    keyMap[MASK_S or MASK_A] = KeyMap(position = sa, center = item.center)
-                    keyMap[MASK_S or MASK_D] = KeyMap(position = sd, center = item.center)
+                    wasdMap[MASK_W or MASK_A] = KeyMap(position = wa, center = item.center)
+                    wasdMap[MASK_W or MASK_D] = KeyMap(position = wd, center = item.center)
+                    wasdMap[MASK_S or MASK_A] = KeyMap(position = sa, center = item.center)
+                    wasdMap[MASK_S or MASK_D] = KeyMap(position = sd, center = item.center)
 
                     alloc(KEYCODE_WASD)
                 }
 
                 is DraggableItem.VariableKey -> {
                     val k = item.keyCode ?: return@forEach
-                    var position = item.position
-                    val shrinkSize =
-                        item.size / 3f  //shrink the size so that artificial taps can be accurate on circular buttons
-                    val end =
-                        position + Offset(x = item.size - shrinkSize, y = item.size - shrinkSize)
-                    position = Offset(position.x + shrinkSize, position.y + shrinkSize)
-
-                    keyMap[k] = KeyMap(position = position, end = end)
+                    val (start, end) = tapArea(item.position, item.size, PADDED_KEY_CIRCLE_RATIO)
+                    keyMap[k] = KeyMap(position = start, end = end)
                     alloc(k)
                 }
 
@@ -826,43 +428,17 @@ class EventHandler(
                         DraggableItemType.SCOPE -> appConfig.scopeKeyCode
                         else -> item.keyCode
                     }
-                    var position = item.position
-                    val shrinkSize =
-                        item.size / 3f  //shrink the size so that artificial taps can be accurate on circular buttons
-                    val end =
-                        position + Offset(x = item.size - shrinkSize, y = item.size - shrinkSize)
-                    position = Offset(position.x + shrinkSize, position.y + shrinkSize)
-                    keyMap[k] = KeyMap(position = position, end = end)
+                    val (start, end) = tapArea(item.position, item.size, 1f)
+                    keyMap[k] = KeyMap(position = start, end = end)
                     alloc(k)
                 }
 
                 is DraggableItem.CancelableKey -> {
                     val k = item.keyCode ?: return@forEach
-                    var position =
-                        item.position
-                    var cancelPosition =
-                        item.cancelPosition
-                    val shrinkSize =
-                        item.size / 3f                                     //shrink the size so that artificial taps can be accurate on circular buttons
-                    val end =
-                        position + Offset(x = item.size - shrinkSize, y = item.size - shrinkSize)
-                    val cancelEnd =
-                        cancelPosition + Offset(
-                            x = item.size - shrinkSize,
-                            y = item.size - shrinkSize
-                        )
-                    position = Offset(position.x + shrinkSize, position.y + shrinkSize)
-                    cancelPosition =
-                        Offset(cancelPosition.x + shrinkSize, cancelPosition.y + shrinkSize)
-                    keyMap[k] =
-                        KeyMap(type = KeymapType.CANCELABLE, position = position, end = end)
-                    val cancelKey = k or KEYCODE_CANCEL
-                    keyMap[cancelKey] =
-                        KeyMap(
-                            type = KeymapType.CANCELABLE,
-                            position = cancelPosition,
-                            end = cancelEnd
-                        )
+                    val (start, end) = tapArea(item.position, item.size, 1f)
+                    val (cStart, cEnd) = tapArea(item.cancelPosition, item.size, 1f)
+                    keyMap[k] = KeyMap(type = KeymapType.CANCELABLE, position = start, end = end)
+                    cancelKeyMap[k] = KeyMap(type = KeymapType.CANCELABLE, position = cStart, end = cEnd)
                     alloc(k)
                 }
             }
@@ -881,6 +457,5 @@ class EventHandler(
         shootingMode = false
         _shootingModeFlow.value = false
         lastWasdMask = 0
-        wasdMask = 0
     }
 }

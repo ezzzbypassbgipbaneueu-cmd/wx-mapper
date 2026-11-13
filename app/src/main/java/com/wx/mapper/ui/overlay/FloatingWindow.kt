@@ -7,7 +7,9 @@ import android.view.KeyEvent
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -21,6 +23,9 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
@@ -29,11 +34,13 @@ import androidx.compose.foundation.shape.CornerSize
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ExitToApp
 import androidx.compose.material.icons.rounded.Done
+import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -56,6 +63,10 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import android.graphics.BitmapFactory
+import com.wx.mapper.model.BUTTON_BASE_SCALE
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.key.key
@@ -89,17 +100,18 @@ import kotlin.math.min
 import kotlin.math.roundToInt
 
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun FloatingBubble(
     expanded: Boolean = false,
+    typing: Boolean = false,
     modifier: Modifier = Modifier.size(50.dp),
+    onLongClick: () -> Unit = {},
     onClick: () -> Unit = {}
 ) {
     Column(modifier = modifier
         .clip(CircleShape)
-        .clickable {
-            onClick()
-        }) {
+        .combinedClickable(onClick = { onClick() }, onLongClick = { onLongClick() })) {
         if (expanded) {
             Image(
                 imageVector = Icons.Rounded.Done,
@@ -108,6 +120,16 @@ fun FloatingBubble(
                     .clip(CircleShape)
                     .background(MaterialTheme.colorScheme.primaryContainer, CircleShape)
                     .padding(8.dp)
+            )
+        } else if (typing) {
+            // Modo digitar ativo: toque para voltar ao mapeamento
+            Image(
+                imageVector = Icons.Rounded.Edit,
+                contentDescription = "Typing mode",
+                modifier = modifier
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.tertiaryContainer, CircleShape)
+                    .padding(12.dp)
             )
         } else {
             Image(
@@ -138,14 +160,16 @@ fun ItemsContainer(
             Log.i("ItemsContainerCompose", "ItemsContainer: added item: $item")
 
             var position by remember(item.id) { mutableStateOf(item.position) }
-            // The original 50dp controls were visually oversized. Apply a visual
-            // default reduction while keeping the saved layout coordinates unchanged.
-            var scale by remember(item.id) {
+            // Escala do usuário (Settings / arrastar no WASD) x tamanho base reduzido.
+            // O valor salvo no WASD guarda só a escala do usuário (antes guardava também o
+            // fator base e encolhia a cada vez que o overlay era reaberto).
+            var userScale by remember(item.id) {
                 mutableFloatStateOf(
-                    (if (item is DraggableItem.WASDGroup) item.scale else appConfig.buttonScale)
-                        .coerceIn(0.35f, 2f) * 0.75f
+                    if (item is DraggableItem.WASDGroup) item.scale.coerceIn(0.5f, 2f) else 1f
                 )
             }
+            val scale = (if (item is DraggableItem.WASDGroup) userScale
+            else appConfig.buttonScale.coerceIn(0.35f, 2f)) * BUTTON_BASE_SCALE
             if (item is DraggableItem.CancelableKey) {
                 if (item.type == DraggableItemType.BAG_MAP) {
                     var cancelableKeyPosition by remember(item.id) { mutableStateOf(item.cancelPosition) }
@@ -265,30 +289,24 @@ fun ItemsContainer(
                     }
 
                     is DraggableItem.WASDGroup -> {
-                        var size by remember { mutableIntStateOf(0) }
                         WASDKeysGroup(onRemove = {
                             onRemove(item.id)
                         }, modifier = Modifier
-                            .onSizeChanged {
-                                size = (it.width * scale).roundToInt()
-                            }
                             .onGloballyPositioned { coordinates ->
-                                val layoutX = coordinates.positionOnScreen().x
-                                val layoutY = coordinates.positionOnScreen().y
-                                item.center =
-                                    coordinates.positionOnScreen() + Offset(
-                                        size / 2f,
-                                        size / 2f
-                                    )
-                                item.w = Offset(item.center.x, layoutY)
-                                item.a = Offset(layoutX, item.center.y)
-                                item.s = Offset(item.center.x, layoutY + size)
-                                item.d = Offset(layoutX + size, item.center.y)
+                                // positionOnScreen já considera a escala (Modifier.scale do pai);
+                                // a largura/altura na tela é a medida x escala.
+                                val topLeft = coordinates.positionOnScreen()
+                                val w = coordinates.size.width * scale
+                                val h = coordinates.size.height * scale
+                                item.center = topLeft + Offset(w / 2f, h / 2f)
+                                item.w = Offset(item.center.x, topLeft.y)
+                                item.a = Offset(topLeft.x, item.center.y)
+                                item.s = Offset(item.center.x, topLeft.y + h)
+                                item.d = Offset(topLeft.x + w, item.center.y)
 
                             }, onPanIconDrag = { dragAmount ->
-                            val scaleAmount = scale + (dragAmount.y / 500)
-                            scale = max(min(scaleAmount, 1.4f), 0.6f)
-                            item.scale = scale
+                            userScale = (userScale + (dragAmount.y / 500)).coerceIn(0.5f, 2f)
+                            item.scale = userScale
                         })
                     }
 
@@ -558,16 +576,50 @@ fun CursorOverlay(
     style: CursorStyle,
     sizeDp: Float,
     color: Int,
-    opacity: Float
+    opacity: Float,
+    imagePath: String? = null,
+    imageVersion: Long = 0L,
+    imageHotspotCenter: Boolean = false,
+    windowOrigin: Offset = Offset.Zero
 ) {
+    // `position` está em coordenadas da TELA (é o ponto onde o toque é injetado);
+    // o overlay desenha em coordenadas da JANELA, então desconta a origem da janela.
+    val local = position - windowOrigin
+
+    val imageBitmap = remember(imagePath, imageVersion) {
+        imagePath?.let { path ->
+            runCatching { BitmapFactory.decodeFile(path)?.asImageBitmap() }.getOrNull()
+        }
+    }
+
+    if (style == CursorStyle.IMAGE && imageBitmap != null) {
+        Image(
+            bitmap = imageBitmap,
+            contentDescription = null,
+            contentScale = ContentScale.Fit,
+            alignment = Alignment.TopStart,
+            modifier = Modifier
+                .offset {
+                    val cursorPx = sizeDp.dp.toPx()
+                    IntOffset(
+                        (local.x - if (imageHotspotCenter) cursorPx / 2f else 0f).roundToInt(),
+                        (local.y - if (imageHotspotCenter) cursorPx / 2f else 0f).roundToInt()
+                    )
+                }
+                .size(sizeDp.dp)
+                .alpha(opacity)
+        )
+        return
+    }
+
     Canvas(
         modifier = Modifier
             .offset {
                 val cursorPx = sizeDp.dp.toPx()
                 val centered = style != CursorStyle.ARROW
                 IntOffset(
-                    (position.x - if (centered) cursorPx / 2f else 0f).roundToInt(),
-                    (position.y - if (centered) cursorPx / 2f else 0f).roundToInt()
+                    (local.x - if (centered) cursorPx / 2f else 0f).roundToInt(),
+                    (local.y - if (centered) cursorPx / 2f else 0f).roundToInt()
                 )
             }
             .size(sizeDp.dp)
@@ -578,7 +630,7 @@ fun CursorOverlay(
         val strokeWidth = (size.minDimension * 0.07f).coerceAtLeast(1.5f)
         val cursorColor = Color(color)
         when (style) {
-            CursorStyle.ARROW -> {
+            CursorStyle.ARROW, CursorStyle.IMAGE -> {
                 val path = Path().apply {
                     moveTo(0f, 0f)
                     lineTo(w * 0.08f, h * 0.91f)
@@ -625,12 +677,21 @@ fun SettingsLayout(
     onCursorStyleChange: (CursorStyle) -> Unit = {},
     onCursorSizeChange: (Float) -> Unit = {},
     onCursorColorChange: (Int) -> Unit = {},
-    onCursorOpacityChange: (Float) -> Unit = {}
+    onCursorOpacityChange: (Float) -> Unit = {},
+    cursorHasImage: Boolean = false,
+    autoTypingMode: Boolean = true,
+    onAutoTypingChange: (Boolean) -> Unit = {},
+    onTypingModeClick: () -> Unit = {},
+    onRecordingModeClick: () -> Unit = {}
 ) {
+    // O painel ficou alto: limita à tela e permite rolar.
+    val maxPanelHeight = (LocalConfiguration.current.screenHeightDp * 0.85f).dp
     Column(
         modifier
+            .heightIn(max = maxPanelHeight)
             .clip(CircleShape.copy(CornerSize(10)))
             .background(color = MaterialTheme.colorScheme.surface)
+            .verticalScroll(rememberScrollState())
             .padding(8.dp)
     ) {
         Row {
@@ -684,7 +745,7 @@ fun SettingsLayout(
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Style", modifier = Modifier.weight(1f))
             TextButton(onClick = {
-                val styles = CursorStyle.values()
+                val styles = CursorStyle.values().filter { it != CursorStyle.IMAGE || cursorHasImage }
                 val next = (styles.indexOf(cursorStyle) + 1) % styles.size
                 onCursorStyleChange(styles[next])
             }) {
@@ -732,6 +793,22 @@ fun SettingsLayout(
             onValueChange = onCursorOpacityChange,
             valueRange = 0.1f..1f
         )
+        TextButton(onClick = onAdvancedSettingsClick) {
+            Text(if (cursorHasImage) "Trocar imagem do cursor…" else "Usar imagem como cursor…")
+        }
+        HorizontalDivider()
+        Text(
+            text = "Digitar / Gravar",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)
+        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Modo digitar automático", modifier = Modifier.weight(1f))
+            Switch(checked = autoTypingMode, onCheckedChange = onAutoTypingChange)
+        }
+        TextButton(onClick = onTypingModeClick) { Text("Ligar modo digitar agora") }
+        TextButton(onClick = onRecordingModeClick) { Text("Esconder tudo (gravação)") }
         HorizontalDivider()
         TextButton(onClick = onAdvancedSettingsClick) {
             Icon(Icons.Rounded.Settings, contentDescription = "Advanced Settings")

@@ -1,6 +1,24 @@
 package com.wx.mapper.ui
 
+import android.content.Context
+import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.net.Uri
+import android.provider.Settings
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.collectAsState
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.platform.LocalContext
+import com.wx.mapper.model.CursorStyle
+import com.wx.mapper.service.TypingState
+import java.io.File
+import java.io.FileOutputStream
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
@@ -149,6 +167,178 @@ fun SettingsScreen(
                             valueRange = 0f..2f, steps = 0, onValueChange = {
                                 newConfig = newConfig.copy(buttonScale = it)
                             })
+                    }
+                }
+                Card {
+                    val context = LocalContext.current
+                    val imagePicker = rememberLauncherForActivityResult(
+                        ActivityResultContracts.GetContent()
+                    ) { uri ->
+                        if (uri != null) {
+                            saveCursorImage(context, uri)?.let { path ->
+                                newConfig = newConfig.copy(
+                                    cursorImagePath = path,
+                                    cursorImageVersion = System.currentTimeMillis(),
+                                    cursorStyle = CursorStyle.IMAGE
+                                )
+                            }
+                        }
+                    }
+                    Column(
+                        Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            "Cursor personalizado",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Text(
+                            "Use qualquer imagem (PNG com fundo transparente fica melhor) como cursor do mouse.",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            val preview = remember(newConfig.cursorImagePath, newConfig.cursorImageVersion) {
+                                newConfig.cursorImagePath?.let { path ->
+                                    runCatching { BitmapFactory.decodeFile(path)?.asImageBitmap() }.getOrNull()
+                                }
+                            }
+                            if (preview != null) {
+                                Image(
+                                    bitmap = preview,
+                                    contentDescription = "Cursor",
+                                    modifier = Modifier
+                                        .size(48.dp)
+                                        .padding(end = 8.dp)
+                                )
+                            }
+                            FilledTonalButton(onClick = { imagePicker.launch("image/*") }) {
+                                Text(if (preview != null) "Trocar imagem" else "Escolher imagem")
+                            }
+                            if (newConfig.cursorImagePath != null) {
+                                TextButton(onClick = {
+                                    newConfig = newConfig.copy(
+                                        cursorImagePath = null,
+                                        cursorStyle = if (newConfig.cursorStyle == CursorStyle.IMAGE)
+                                            CursorStyle.ARROW else newConfig.cursorStyle
+                                    )
+                                }) { Text("Remover") }
+                            }
+                        }
+                        if (newConfig.cursorImagePath != null) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Column(Modifier.weight(1f)) {
+                                    Text("Ponto do clique no centro", style = MaterialTheme.typography.titleMedium)
+                                    Text(
+                                        "Desligado: o clique sai da ponta (canto superior esquerdo) da imagem.",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                Switch(
+                                    checked = newConfig.cursorImageHotspotCenter,
+                                    onCheckedChange = {
+                                        newConfig = newConfig.copy(cursorImageHotspotCenter = it)
+                                    })
+                            }
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("Usar a imagem como cursor", modifier = Modifier.weight(1f))
+                                Switch(
+                                    checked = newConfig.cursorStyle == CursorStyle.IMAGE,
+                                    onCheckedChange = {
+                                        newConfig = newConfig.copy(
+                                            cursorStyle = if (it) CursorStyle.IMAGE else CursorStyle.ARROW
+                                        )
+                                    })
+                            }
+                        }
+                    }
+                }
+                Card {
+                    val context = LocalContext.current
+                    val detectorOn by TypingState.serviceConnected.collectAsState()
+                    Column(
+                        Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Text(
+                            "Modo digitar",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text("Automático", style = MaterialTheme.typography.titleMedium)
+                                Text(
+                                    "Ao abrir um campo de texto, o teclado é liberado sozinho (sem clicar em nada). Ao tocar fora do campo, volta ao mapeamento.",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Switch(
+                                checked = newConfig.autoTypingMode,
+                                onCheckedChange = { newConfig = newConfig.copy(autoTypingMode = it) })
+                        }
+                        if (newConfig.autoTypingMode && !detectorOn) {
+                            Text(
+                                "Para detectar o campo de texto, ative \"WX Mapper - detector de digitação\" em Acessibilidade. Ele só observa o foco; não lê o que você digita.",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                            FilledTonalButton(onClick = {
+                                context.startActivity(
+                                    Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+                                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                )
+                            }) { Text("Abrir Acessibilidade") }
+                        } else if (newConfig.autoTypingMode) {
+                            Text(
+                                "Detector ativo.",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                        HorizontalDivider()
+                        KeyConfigTextField(
+                            title = "Ligar modo digitar:",
+                            value = newConfig.typingModeKeyCode.keyCodeToString()
+                        ) {
+                            newConfig = newConfig.copy(typingModeKeyCode = it.nativeKeyEvent.keyCode)
+                            return@KeyConfigTextField true
+                        }
+                        Text(
+                            "Para sair do modo digitar manual: toque (ou segure) na bolha.",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+                Card {
+                    Column(
+                        Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Text(
+                            "Modo gravação",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Text(
+                            "Esconde TUDO do keymapper (botões, cursor e bolha) para gravar a tela. O mapeamento continua funcionando. Aperte a tecla de novo (ou use a ação na notificação) para mostrar.",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        KeyConfigTextField(
+                            title = "Esconder / mostrar tudo:",
+                            value = newConfig.recordingModeKeyCode.keyCodeToString()
+                        ) {
+                            newConfig = newConfig.copy(recordingModeKeyCode = it.nativeKeyEvent.keyCode)
+                            return@KeyConfigTextField true
+                        }
                     }
                 }
                 Card(modifier = Modifier.fillMaxWidth()) {
@@ -439,3 +629,20 @@ fun KeyConfigTextField(
         }
     }
 }
+
+/** Copia a imagem escolhida para o armazenamento do app (reduzida) e devolve o caminho. */
+private fun saveCursorImage(context: Context, uri: Uri): String? = runCatching {
+    val resolver = context.contentResolver
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    resolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
+    var sample = 1
+    while (bounds.outWidth / sample > 512 || bounds.outHeight / sample > 512) sample *= 2
+    val options = BitmapFactory.Options().apply { inSampleSize = sample }
+    val bitmap = resolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, options) }
+        ?: return@runCatching null
+    val file = File(context.filesDir, "cursor_custom_${System.currentTimeMillis()}.png")
+    FileOutputStream(file).use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+    context.filesDir.listFiles { f -> f.name.startsWith("cursor_custom_") && f != file }
+        ?.forEach { it.delete() }
+    file.absolutePath
+}.getOrNull()

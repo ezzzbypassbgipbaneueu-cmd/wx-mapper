@@ -4,7 +4,11 @@ import android.annotation.SuppressLint
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
+import android.app.PendingIntent
+import android.content.Context
 import android.content.Intent
+import android.os.Build
+import android.view.View
 import android.graphics.PixelFormat
 import android.os.IBinder
 import android.util.Log
@@ -19,6 +23,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Box
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -70,6 +75,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 import kotlin.math.roundToInt
@@ -85,6 +91,7 @@ class FloatingBubbleService : Service() {
 
     companion object {
         val INTENT_EXTRA_PACAKAGE = "launchedPackageName"
+        const val ACTION_TOGGLE_RECORDING = "com.wx.mapper.action.TOGGLE_RECORDING"
         private val _isRunning = MutableStateFlow(false)
         val isRunning = _isRunning.asStateFlow()
     }
@@ -92,11 +99,19 @@ class FloatingBubbleService : Service() {
     private val lifecycleOwner = ServiceLifecycleOwner()
 
     private val scope = CoroutineScope(Dispatchers.Main)
-    private var containerView: FrameLayout? = null
+    private var containerView: ComposeView? = null
+    /** Raiz que de fato é adicionada ao WindowManager; recebe TODA tecla, com ou sem foco interno. */
+    private var containerRoot: KeyCaptureFrameLayout? = null
+    private lateinit var itemsContainerLP: WindowManager.LayoutParams
     private var floatingBubbleView: ComposeView? = null
 
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_TOGGLE_RECORDING) {
+            // Ação da notificação: esconde/mostra tudo sem recriar o overlay.
+            if (containerRoot != null) stateManager.get().toggleRecordingMode()
+            return START_NOT_STICKY
+        }
         _isRunning.value = true
         val channel = NotificationChannel(
             "channel1",
@@ -109,7 +124,14 @@ class FloatingBubbleService : Service() {
         }
         val notificationManager = getSystemService(NotificationManager::class.java)
         notificationManager.createNotificationChannel(channel)
+        val toggleIntent = PendingIntent.getService(
+            this, 1,
+            Intent(this, FloatingBubbleService::class.java).setAction(ACTION_TOGGLE_RECORDING),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
         val notification = NotificationCompat.Builder(this, "channel1").apply {
+            setSmallIcon(R.drawable.ic_launcher_monochrome)
+            addAction(0, "Esconder / mostrar tudo (gravação)", toggleIntent)
             setContentTitle(ContextCompat.getString(baseContext, R.string.app_name))
             setContentText(
                 "${
@@ -130,7 +152,21 @@ class FloatingBubbleService : Service() {
         return START_NOT_STICKY
     }
 
+    private fun applyCutoutAndInsets(lp: WindowManager.LayoutParams) {
+        // Sem isso o sistema empurra a janela para fora do notch / barras (principalmente em
+        // paisagem). A janela ficava deslocada: o cursor desenhado não coincidia com o toque
+        // injetado e a faixa da direita ficava inalcançável.
+        lp.layoutInDisplayCutoutMode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
+            WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+        else
+            WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            lp.setFitInsetsTypes(0)
+        }
+    }
+
     private fun init() {
+        if (containerRoot != null) return // já inicializado
 
         floatingBubbleLP = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
@@ -140,25 +176,60 @@ class FloatingBubbleService : Service() {
             PixelFormat.TRANSLUCENT
         )
         floatingBubbleLP.gravity = Gravity.START or Gravity.TOP
+        applyCutoutAndInsets(floatingBubbleLP)
 
-        val itemsContainerLP = WindowManager.LayoutParams()
+        itemsContainerLP = WindowManager.LayoutParams()
         itemsContainerLP.copyFrom(floatingBubbleLP)
-        // The initial params were copied from the non-focusable bubble window.
-        // Keep this full-screen input layer focusable so physical keyboard events
-        // can reach the mapper immediately, while touch events pass through to the game.
+        itemsContainerLP.gravity = Gravity.START or Gravity.TOP
+        itemsContainerLP.x = 0
+        itemsContainerLP.y = 0
         itemsContainerLP.flags =
             WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
             WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
             WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+        itemsContainerLP.width = WindowManager.LayoutParams.MATCH_PARENT
+        itemsContainerLP.height = WindowManager.LayoutParams.MATCH_PARENT
+        applyCutoutAndInsets(itemsContainerLP)
 
         containerView =
             getItemsContainerView { id ->
                 stateManager.get().removeItem(id)
             }
 
+        containerRoot = KeyCaptureFrameLayout(this).apply {
+            keyInterceptor = { event ->
+                val sm = stateManager.get()
+                if (sm.isBubbleExpanded.value || sm.isTypingMode.value) false
+                else sm.onKeyEvent(event)
+            }
+            addView(
+                containerView!!,
+                FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT
+                )
+            )
+            setViewTreeLifecycleOwner(lifecycleOwner)
+            setViewTreeSavedStateRegistryOwner(lifecycleOwner)
+            // Mede onde a janela realmente está na tela (origem) e corrige cursor/botões.
+            addOnLayoutChangeListener { v, _, _, _, _, _, _, _, _ ->
+                val loc = IntArray(2)
+                v.getLocationOnScreen(loc)
+                stateManager.get().onOverlayWindowPositioned(loc[0], loc[1])
+            }
+        }
+
         floatingBubbleView = getFloatingBubbleView(
             onCLick = {
-                stateManager.get().onFloatingBubbleClick()
+                val sm = stateManager.get()
+                if (sm.isTypingMode.value && !sm.isBubbleExpanded.value) sm.exitTypingMode()
+                else sm.onFloatingBubbleClick()
+            },
+            onLongClick = {
+                val sm = stateManager.get()
+                if (!sm.isBubbleExpanded.value) {
+                    if (sm.isTypingMode.value) sm.exitTypingMode() else sm.setManualTyping(true)
+                }
             },
             onAddItem = { itemType ->
                 Log.i(TAG, "init: $itemType")
@@ -166,58 +237,90 @@ class FloatingBubbleService : Service() {
             }
         )
         scope.launch {
-            stateManager.get().isBubbleExpanded.collect { expanded ->
-                itemsContainerLP.apply {
-                    width = WindowManager.LayoutParams.MATCH_PARENT
-                    height = WindowManager.LayoutParams.MATCH_PARENT
-                }
-                if (expanded) {
-                    itemsContainerLP.flags =
-                        WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
-                    stateManager.get().windowManager.updateViewLayout(
-                        containerView,
-                        itemsContainerLP
-                    )
-                    containerView?.clearFocus()
-                    containerView?.requestFocus()
-                    containerView?.releasePointerCapture()
-                    stateManager.get().clearActivePointers()
-                } else {
-                    itemsContainerLP.flags =
-                        WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
-                    stateManager.get().windowManager.updateViewLayout(
-                        containerView,
-                        itemsContainerLP
-                    )
-                    containerView?.post {
-                        containerView?.clearFocus()
-                        containerView?.requestFocus()
-                        containerView?.requestPointerCapture()
+            combine(
+                stateManager.get().isBubbleExpanded,
+                stateManager.get().isTypingMode
+            ) { expanded, typing -> expanded to typing }
+                .collect { (expanded, typing) -> applyOverlayMode(expanded, typing) }
+        }
+        scope.launch {
+            // Modo gravação: a bolha some junto com o resto (mas continua existindo).
+            stateManager.get().recordingMode.collect { recording ->
+                floatingBubbleView?.visibility = if (recording) View.INVISIBLE else View.VISIBLE
+                floatingBubbleView?.let { v ->
+                    if (v.isAttachedToWindow) {
+                        floatingBubbleLP.flags = if (recording)
+                            floatingBubbleLP.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+                        else
+                            floatingBubbleLP.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
+                        stateManager.get().windowManager.updateViewLayout(v, floatingBubbleLP)
                     }
                 }
             }
         }
-        stateManager.get().windowManager.addView(containerView, itemsContainerLP)
+        stateManager.get().windowManager.addView(containerRoot, itemsContainerLP)
         floatingBubbleLP.y = 200
         stateManager.get().windowManager.addView(floatingBubbleView, floatingBubbleLP)
         containerView?.postDelayed({
-            if (!stateManager.get().isBubbleExpanded.value) {
+            val sm = stateManager.get()
+            if (!sm.isBubbleExpanded.value && !sm.isTypingMode.value) {
                 containerView?.requestFocus()
                 containerView?.requestPointerCapture()
             }
         }, 1000)
     }
 
+    /** Aplica o estado do overlay: editando / mapeando / digitando. */
+    private fun applyOverlayMode(expanded: Boolean, typing: Boolean) {
+        val root = containerRoot ?: return
+        val wm = stateManager.get().windowManager
+        itemsContainerLP.width = WindowManager.LayoutParams.MATCH_PARENT
+        itemsContainerLP.height = WindowManager.LayoutParams.MATCH_PARENT
+        val base = WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
+        when {
+            expanded -> {
+                itemsContainerLP.flags = base
+                wm.updateViewLayout(root, itemsContainerLP)
+                containerView?.clearFocus()
+                containerView?.requestFocus()
+                containerView?.releasePointerCapture()
+                stateManager.get().clearActivePointers()
+            }
+            typing -> {
+                // MODO DIGITAR: o overlay não pega foco nem toque; o teclado e o mouse
+                // vão direto para o app/jogo, então o campo de texto recebe tudo sem clicar em nada.
+                itemsContainerLP.flags = base or
+                        WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                containerView?.releasePointerCapture()
+                stateManager.get().clearActivePointers()
+                wm.updateViewLayout(root, itemsContainerLP)
+            }
+            else -> {
+                itemsContainerLP.flags = base or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+                wm.updateViewLayout(root, itemsContainerLP)
+                containerView?.post {
+                    containerView?.clearFocus()
+                    containerView?.requestFocus()
+                    containerView?.requestPointerCapture()
+                }
+            }
+        }
+    }
+
 
     private fun getFloatingBubbleView(
         onCLick: () -> Unit,
+        onLongClick: () -> Unit,
         onAddItem: (DraggableItemType) -> Unit
     ): ComposeView {
         val composeView = ComposeView(this)
         composeView.setContent {
             FloatingBubbleLayout(
                 onAddItem = onAddItem,
-                onBubbleClick = onCLick
+                onBubbleClick = onCLick,
+                onBubbleLongClick = onLongClick
             )
         }
         composeView.setViewTreeLifecycleOwner(lifecycleOwner)
@@ -228,28 +331,10 @@ class FloatingBubbleService : Service() {
     @SuppressLint("ClickableViewAccessibility")
     private fun getItemsContainerView(
         onRemove: (Int) -> Unit
-    ): FrameLayout {
-        // Use a focusable ViewGroup as the actual window root. ComposeView is not
-        // a reliable place to intercept hardware dispatch on every Android build.
-        val root = object : FrameLayout(this) {
-            override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-                if (event.action == KeyEvent.ACTION_DOWN || event.action == KeyEvent.ACTION_UP) {
-                    val manager = stateManager.get()
-                    if (!manager.isBubbleExpanded.value && manager.onKeyEvent(event)) {
-                        return true
-                    }
-                }
-                return super.dispatchKeyEvent(event)
-            }
-        }
-        root.layoutParams = FrameLayout.LayoutParams(
-            FrameLayout.LayoutParams.MATCH_PARENT,
-            FrameLayout.LayoutParams.MATCH_PARENT
-        )
-        root.isFocusable = true
-        root.isFocusableInTouchMode = true
-
+    ): ComposeView {
         val composeView = ComposeView(this)
+        // As teclas físicas são interceptadas na raiz (KeyCaptureFrameLayout), que recebe
+        // todo KeyEvent da janela independentemente de qual view interna está com foco.
         composeView.layoutParams = FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.MATCH_PARENT,
             FrameLayout.LayoutParams.MATCH_PARENT
@@ -262,16 +347,24 @@ class FloatingBubbleService : Service() {
                 val isShootingMode by stateManager.get().isShootingMode.collectAsState()
                 val pointerOffset by stateManager.get().pointerOffset.collectAsState()
                 val keysConfig by stateManager.get().keysConfig.collectAsState()
+                val windowOrigin by stateManager.get().windowOrigin.collectAsState()
+                val isTyping by stateManager.get().isTypingMode.collectAsState()
+                val isRecording by stateManager.get().recordingMode.collectAsState()
                 Box {
-                    if (!isBubbleExpanded && itemsContainerOpacity == 0f)
+                    // Modo gravação / opacidade 0: esconde botões E cursor virtual.
+                    if (!isBubbleExpanded && (itemsContainerOpacity == 0f || isRecording))
                         return@Box
-                    if (!isBubbleExpanded && !isShootingMode) {
+                    if (!isBubbleExpanded && !isShootingMode && !isTyping) {
                         CursorOverlay(
                             position = pointerOffset,
                             style = keysConfig.cursorStyle,
                             sizeDp = keysConfig.cursorSizeDp,
                             color = keysConfig.cursorColor,
-                            opacity = keysConfig.cursorOpacity
+                            opacity = keysConfig.cursorOpacity,
+                            imagePath = keysConfig.cursorImagePath,
+                            imageVersion = keysConfig.cursorImageVersion,
+                            imageHotspotCenter = keysConfig.cursorImageHotspotCenter,
+                            windowOrigin = windowOrigin
                         )
                     }
                     ItemsContainer(
@@ -286,14 +379,22 @@ class FloatingBubbleService : Service() {
         }
         composeView.setViewTreeLifecycleOwner(lifecycleOwner)
         composeView.setViewTreeSavedStateRegistryOwner(lifecycleOwner)
-        root.addView(composeView)
-        root.setOnCapturedPointerListener { _, motionEvent ->
-            stateManager.get().onMouseEvent(motionEvent)
+        composeView.isFocusable = true
+        composeView.isClickable = true
+        composeView.isFocusableInTouchMode = true
+        composeView.post {
+            composeView.setOnCapturedPointerListener { _, motionEvent ->
+                stateManager.get().onMouseEvent(motionEvent)
+            }
         }
-        root.setOnFocusChangeListener { view, hasFocus ->
+        composeView.setOnFocusChangeListener { view, hasFocus ->
             if (!hasFocus) {
+                // Ignore transient focus changes caused by pointer capture / overlay
+                // updates. Clear mapped inputs only if the overlay is still unfocused
+                // on the next UI-loop turn.
                 view.post {
-                    if (!stateManager.get().isBubbleExpanded.value && !view.hasFocus()) {
+                    if (!stateManager.get().isBubbleExpanded.value &&
+                        !stateManager.get().isTypingMode.value && !view.hasFocus()) {
                         stateManager.get().onFocusLost()
                         view.requestFocus()
                         view.requestPointerCapture()
@@ -301,8 +402,9 @@ class FloatingBubbleService : Service() {
                 }
             }
         }
-        return root
+        return composeView
     }
+
 
     override fun onBind(p0: Intent?): IBinder? {
         return null
@@ -318,9 +420,10 @@ class FloatingBubbleService : Service() {
     }
 
     private fun removeAllViews() {
-        containerView?.let {
+        containerRoot?.let {
             stateManager.get().windowManager.removeViewImmediate(it)
         }
+        containerRoot = null
         floatingBubbleView?.let {
             stateManager.get().windowManager.removeViewImmediate(it)
         }
@@ -330,8 +433,10 @@ class FloatingBubbleService : Service() {
     private fun FloatingBubbleLayout(
         modifier: Modifier = Modifier,
         onAddItem: (DraggableItemType) -> Unit,
-        onBubbleClick: () -> Unit
+        onBubbleClick: () -> Unit,
+        onBubbleLongClick: () -> Unit = {}
     ) {
+        val isTypingNow by stateManager.get().isTypingMode.collectAsState()
         var opacity by remember { mutableFloatStateOf(0.5f) }
         val isExpanded by stateManager.get().isBubbleExpanded.collectAsState()
         var itemsMenuVisible by remember { mutableStateOf(false) }
@@ -350,7 +455,7 @@ class FloatingBubbleService : Service() {
                             opacity = 1.0f
                         }, onDragEnd = {
                             if (!isExpanded) opacity = 0.5f
-                            if (floatingBubbleLP.x < baseContext.resources.displayMetrics.widthPixels / 2) {
+                            if (floatingBubbleLP.x < stateManager.get().screenWidthPx / 2) {
                                 floatingBubbleLP.x = 0
                                 stateManager.get().windowManager.updateViewLayout(
                                     floatingBubbleView,
@@ -358,7 +463,7 @@ class FloatingBubbleService : Service() {
                                 )
                             } else {
                                 floatingBubbleLP.x =
-                                    baseContext.resources.displayMetrics.widthPixels - (floatingBubbleView?.width
+                                    stateManager.get().screenWidthPx - (floatingBubbleView?.width
                                         ?: 0)
                                 stateManager.get().windowManager.updateViewLayout(
                                     floatingBubbleView,
@@ -395,7 +500,8 @@ class FloatingBubbleService : Service() {
                     modifier = Modifier
                         .size(50.dp)
                         .constrainAs(bubble) { },
-                    expanded = isExpanded, onClick = onBubbleClick
+                    expanded = isExpanded, typing = isTypingNow,
+                    onClick = onBubbleClick, onLongClick = onBubbleLongClick
                 )
                 AnimatedVisibility(
                     visible = isExpanded,
@@ -471,6 +577,17 @@ class FloatingBubbleService : Service() {
                         onCursorSizeChange = { stateManager.get().updateCursorSize(it) },
                         onCursorColorChange = { stateManager.get().updateCursorColor(it) },
                         onCursorOpacityChange = { stateManager.get().updateCursorOpacity(it) },
+                        cursorHasImage = keysConfig.cursorImagePath != null,
+                        autoTypingMode = keysConfig.autoTypingMode,
+                        onAutoTypingChange = { stateManager.get().updateAutoTyping(it) },
+                        onTypingModeClick = {
+                            stateManager.get().onFloatingBubbleClick()
+                            stateManager.get().setManualTyping(true)
+                        },
+                        onRecordingModeClick = {
+                            stateManager.get().onFloatingBubbleClick()
+                            stateManager.get().toggleRecordingMode()
+                        },
                         onAdvancedSettingsClick = {
                             val intent = Intent(baseContext, MainActivity::class.java).apply {
                                 flags =
@@ -574,5 +691,15 @@ fun PreviewFloatingBubble() {
                 )
             }
         }
+    }
+}
+
+/** Raiz do overlay: intercepta toda tecla antes de qualquer view filha (não depende de foco interno). */
+class KeyCaptureFrameLayout(context: Context) : FrameLayout(context) {
+    var keyInterceptor: ((KeyEvent) -> Boolean)? = null
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (keyInterceptor?.invoke(event) == true) return true
+        return super.dispatchKeyEvent(event)
     }
 }
