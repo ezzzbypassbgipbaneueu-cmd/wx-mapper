@@ -47,8 +47,8 @@ class AutoClicker(
 
                     val c = currentConfig
                     val periodMs = (1000f / c.cps).toLong().coerceAtLeast(1L)
-                    // Toque curto: só o tempo configurado (padrão 3 ms), nunca mais da metade do ciclo.
-                    val holdMs = c.holdMs.coerceAtMost((periodMs / 2).coerceAtLeast(1L)).coerceAtLeast(1L)
+                    // Toque curto: só o tempo configurado (padrão 3 ms; 0 = solta logo em seguida), nunca mais da metade do ciclo.
+                    val holdMs = c.holdMs.coerceIn(0L, periodMs / 2)
                     val restMs = (periodMs - holdMs).coerceAtLeast(1L)
                     val position = currentPosition?.invoke() ?: Offset.Zero
 

@@ -100,14 +100,14 @@ fun AutoclickerScreen(
             }
 
             GlassCard {
-                Text("Tempo do toque: ${cfg.holdMs} ms")
+                Text(if (cfg.holdMs == 0L) "Tempo do toque: instantâneo (0 ms)" else "Tempo do toque: ${cfg.holdMs} ms")
                 Slider(
                     value = cfg.holdMs.toFloat(),
                     onValueChange = { cfg = cfg.copy(holdMs = it.roundToInt().toLong()) },
                     onValueChangeFinished = { update(cfg) },
                     valueRange = AutoClickerConfig.MIN_HOLD_MS.toFloat()..AutoClickerConfig.MAX_HOLD_MS.toFloat()
                 )
-                Text("Quanto o toque fica apertado. Menor = solta mais rápido (1–3 ms é o mais rápido; se o jogo não registrar, suba um pouco).", style = MaterialTheme.typography.bodySmall)
+                Text("Quanto o toque fica apertado. 0 = aperta e solta em sequência, sem espera. Se o jogo não registrar os cliques, suba um pouco.", style = MaterialTheme.typography.bodySmall)
             }
 
             GlassCard {
