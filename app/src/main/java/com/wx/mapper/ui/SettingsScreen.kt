@@ -390,7 +390,7 @@ fun SettingsScreen(
                             color = MaterialTheme.colorScheme.primary
                         )
                         Text(
-                            "Esconde TUDO do keymapper (botões, cursor e bolha) para gravar a tela. O mapeamento continua funcionando. Aperte a tecla de novo (ou use a ação na notificação) para mostrar.",
+                            "Esconde os botões e a bolha do keymapper para gravar a tela (o cursor continua visível para você). O mapeamento continua funcionando. Aperte a tecla de novo (ou use a ação na notificação) para mostrar.",
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -400,6 +400,20 @@ fun SettingsScreen(
                         ) {
                             newConfig = newConfig.copy(recordingModeKeyCode = it.nativeKeyEvent.keyCode)
                             return@KeyConfigTextField true
+                        }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text("Ocultar só da gravação (experimental)", style = MaterialTheme.typography.titleMedium)
+                                Text(
+                                    "Cursor e botões continuam aparecendo para você, mas o overlay usa FLAG_SECURE para sumir da gravação. Em alguns aparelhos/gravadores a gravação pode sair com área preta; se acontecer, desligue.",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Switch(
+                                checked = newConfig.recordingSecureWindow,
+                                onCheckedChange = { newConfig = newConfig.copy(recordingSecureWindow = it) }
+                            )
                         }
                     }
                 }

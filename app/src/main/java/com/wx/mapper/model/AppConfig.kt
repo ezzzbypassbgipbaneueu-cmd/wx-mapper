@@ -47,6 +47,13 @@ data class AppConfig(
     val recordingModeKeyCode: Int = KeyEvent.KEYCODE_F10,
     /** Tecla que começa/termina a gravação de uma macro (dentro do jogo). */
     val macroRecordKeyCode: Int = KeyEvent.KEYCODE_F8,
+    /**
+     * Modo gravação com FLAG_SECURE (experimental): cursor e botões continuam visíveis para
+     * o usuário, mas as janelas do overlay são marcadas como seguras e o sistema as omite
+     * (ou pinta de preto) nas gravações/capturas de tela. false = botões e bolha somem,
+     * o cursor continua aparecendo.
+     */
+    val recordingSecureWindow: Boolean = false,
 ) {
     companion object {
         val Default = AppConfig(

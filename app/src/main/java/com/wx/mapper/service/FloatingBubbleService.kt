@@ -77,6 +77,8 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 import kotlin.math.roundToInt
@@ -104,6 +106,8 @@ class FloatingBubbleService : Service() {
     /** Raiz que de fato é adicionada ao WindowManager; recebe TODA tecla, com ou sem foco interno. */
     private var containerRoot: KeyCaptureFrameLayout? = null
     private lateinit var itemsContainerLP: WindowManager.LayoutParams
+    /** true enquanto o modo gravação está ligado com FLAG_SECURE nas janelas do overlay. */
+    private var secureActive = false
     private var floatingBubbleView: ComposeView? = null
 
 
@@ -245,19 +249,40 @@ class FloatingBubbleService : Service() {
                 .collect { (expanded, typing) -> applyOverlayMode(expanded, typing) }
         }
         scope.launch {
-            // Modo gravação: a bolha some junto com o resto (mas continua existindo).
-            stateManager.get().recordingMode.collect { recording ->
-                floatingBubbleView?.visibility = if (recording) View.INVISIBLE else View.VISIBLE
-                floatingBubbleView?.let { v ->
-                    if (v.isAttachedToWindow) {
-                        floatingBubbleLP.flags = if (recording)
-                            floatingBubbleLP.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
-                        else
-                            floatingBubbleLP.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
-                        stateManager.get().windowManager.updateViewLayout(v, floatingBubbleLP)
+            // Modo gravação. Dois jeitos (config "recordingSecureWindow"):
+            //  - normal: a bolha e os botões somem; o cursor continua visível para você.
+            //  - seguro (experimental): tudo continua visível para você, mas as janelas do overlay
+            //    recebem FLAG_SECURE para o sistema omiti-las da gravação.
+            combine(
+                stateManager.get().recordingMode,
+                stateManager.get().keysConfig.map { it.recordingSecureWindow }.distinctUntilChanged()
+            ) { recording, secure -> recording to secure }
+                .collect { (recording, secure) ->
+                    val hide = recording && !secure
+                    secureActive = recording && secure
+                    val wm = stateManager.get().windowManager
+                    floatingBubbleView?.visibility = if (hide) View.INVISIBLE else View.VISIBLE
+                    floatingBubbleView?.let { v ->
+                        if (v.isAttachedToWindow) {
+                            var f = floatingBubbleLP.flags
+                            f = if (hide) f or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+                            else f and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
+                            f = if (secureActive) f or WindowManager.LayoutParams.FLAG_SECURE
+                            else f and WindowManager.LayoutParams.FLAG_SECURE.inv()
+                            floatingBubbleLP.flags = f
+                            wm.updateViewLayout(v, floatingBubbleLP)
+                        }
+                    }
+                    containerRoot?.let { r ->
+                        if (r.isAttachedToWindow) {
+                            itemsContainerLP.flags = if (secureActive)
+                                itemsContainerLP.flags or WindowManager.LayoutParams.FLAG_SECURE
+                            else
+                                itemsContainerLP.flags and WindowManager.LayoutParams.FLAG_SECURE.inv()
+                            wm.updateViewLayout(r, itemsContainerLP)
+                        }
                     }
                 }
-            }
         }
         stateManager.get().windowManager.addView(containerRoot, itemsContainerLP)
         floatingBubbleLP.y = 200
@@ -278,8 +303,10 @@ class FloatingBubbleService : Service() {
         val wm = stateManager.get().windowManager
         itemsContainerLP.width = WindowManager.LayoutParams.MATCH_PARENT
         itemsContainerLP.height = WindowManager.LayoutParams.MATCH_PARENT
+        // FLAG_SECURE só nas janelas do overlay (nunca na Activity do app) e só no modo gravação.
         val base = WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
+                (if (secureActive) WindowManager.LayoutParams.FLAG_SECURE else 0)
         when {
             expanded -> {
                 itemsContainerLP.flags = base
@@ -354,7 +381,7 @@ class FloatingBubbleService : Service() {
                 val isRecording by stateManager.get().recordingMode.collectAsState()
                 val macroRecording by stateManager.get().macroRecording.collectAsState()
                 Box {
-                    if (macroRecording && !isRecording) {
+                    if (macroRecording && (!isRecording || keysConfig.recordingSecureWindow)) {
                         androidx.compose.material3.Text(
                             "● GRAVANDO MACRO — aperte ${keysConfig.macroRecordKeyCode.keyCodeToString()} para parar",
                             color = androidx.compose.ui.graphics.Color.White,
@@ -368,9 +395,10 @@ class FloatingBubbleService : Service() {
                                 .padding(horizontal = 8.dp, vertical = 4.dp)
                         )
                     }
-                    // Modo gravação / opacidade 0: esconde botões E cursor virtual.
-                    if (!isBubbleExpanded && (itemsContainerOpacity == 0f || isRecording))
+                    // Opacidade 0: esconde botões E cursor virtual.
+                    if (!isBubbleExpanded && itemsContainerOpacity == 0f)
                         return@Box
+                    // Cursor: continua visível no modo gravação (senão você fica sem ver onde clica).
                     if (!isBubbleExpanded && !isShootingMode && !isTyping) {
                         CursorOverlay(
                             position = pointerOffset,
@@ -384,6 +412,9 @@ class FloatingBubbleService : Service() {
                             windowOrigin = windowOrigin
                         )
                     }
+                    // Modo gravação normal: só os botões somem. No modo seguro eles ficam (FLAG_SECURE).
+                    if (!isBubbleExpanded && isRecording && !keysConfig.recordingSecureWindow)
+                        return@Box
                     ItemsContainer(
                         Modifier.alpha(if (isBubbleExpanded) 1f else itemsContainerOpacity),
                         appConfig = keysConfig,
