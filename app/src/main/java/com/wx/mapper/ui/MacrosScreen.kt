@@ -2,6 +2,15 @@ package com.wx.mapper.ui
 
 import android.view.KeyEvent
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -162,18 +171,46 @@ private fun MacroEditor(macro: Macro, onChange: (Macro) -> Unit) {
                     Text("Repetir em loop", Modifier.weight(1f))
                     Switch(macro.loop, { onChange(macro.copy(loop = it)) })
                 }
-                Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                    OutlinedButton(
-                        onClick = { capturing = true },
-                        modifier = Modifier.focusRequester(focus).onKeyEvent {
-                            if (capturing && it.type == KeyEventType.KeyDown) {
-                                onChange(macro.copy(triggerKeyCode = it.key.nativeKeyCode)); capturing = false; true
-                            } else false
-                        }
+                Text("Tecla de atalho", style = MaterialTheme.typography.titleSmall)
+                Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    // Mesmo esquema do Settings: caixa focável + clique pede o foco + onKeyEvent.
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(12.dp))
+                            .border(1.dp, if (capturing) Color.Cyan else MaterialTheme.colorScheme.outline, RoundedCornerShape(12.dp))
+                            .clickable { capturing = true; focus.requestFocus() }
                     ) {
-                        Text(if (capturing) "Aperte uma tecla…" else "Tecla: ${macro.triggerKeyCode?.keyCodeToString() ?: "nenhuma"}")
+                        Text(
+                            if (capturing) "Aperte uma tecla…" else "Tecla: ${macro.triggerKeyCode?.keyCodeToString() ?: "nenhuma"}",
+                            modifier = Modifier
+                                .padding(vertical = 10.dp, horizontal = 16.dp)
+                                .focusRequester(focus)
+                                .onFocusChanged { if (!it.isFocused) capturing = false }
+                                .onPreviewKeyEvent {
+                                    if (capturing && it.type == KeyEventType.KeyDown) {
+                                        onChange(macro.copy(triggerKeyCode = it.key.nativeKeyCode)); capturing = false; true
+                                    } else false
+                                }
+                                .focusable()
+                        )
                     }
-                    if (macro.triggerKeyCode != null) TextButton({ onChange(macro.copy(triggerKeyCode = null)) }) { Text("Limpar") }
+                    if (capturing) TextButton({ capturing = false }) { Text("Cancelar") }
+                    else if (macro.triggerKeyCode != null) TextButton({ onChange(macro.copy(triggerKeyCode = null)) }) { Text("Limpar") }
+                }
+                // Alternativa por toque (sem teclado físico): F8/F9/F10 são reservadas (gravar/digitar/gravar modo).
+                Text("Ou escolha aqui:", style = MaterialTheme.typography.bodySmall)
+                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf(
+                        KeyEvent.KEYCODE_F1, KeyEvent.KEYCODE_F2, KeyEvent.KEYCODE_F3, KeyEvent.KEYCODE_F4,
+                        KeyEvent.KEYCODE_F5, KeyEvent.KEYCODE_F6, KeyEvent.KEYCODE_F7,
+                        KeyEvent.KEYCODE_F11, KeyEvent.KEYCODE_F12,
+                    ).forEach { code ->
+                        FilterChip(
+                            selected = macro.triggerKeyCode == code,
+                            onClick = { onChange(macro.copy(triggerKeyCode = code)); capturing = false },
+                            label = { Text(code.keyCodeToString()) }
+                        )
+                    }
                 }
                 if (macro.actions.isNotEmpty()) {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
