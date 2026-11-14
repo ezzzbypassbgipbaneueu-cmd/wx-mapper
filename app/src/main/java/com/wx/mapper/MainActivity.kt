@@ -136,6 +136,26 @@ class MainActivity : ComponentActivity() {
                                 viewModel.saveKeyConfig(transform(viewModel.appConfig.value))
                             },
                             onNavigateAbout = { navController.navigate(route = AboutScreen) },
+                            onExportBackup = { uri ->
+                                viewModel.exportBackup(uri) { r ->
+                                    Toast.makeText(
+                                        this@MainActivity,
+                                        if (r.isSuccess) "Configurações exportadas." else "Falha ao exportar: ${r.exceptionOrNull()?.message}",
+                                        Toast.LENGTH_LONG
+                                    ).show()
+                                }
+                            },
+                            onImportBackup = { uri ->
+                                viewModel.importBackup(uri) { r ->
+                                    Toast.makeText(
+                                        this@MainActivity,
+                                        if (r.isSuccess) "Configurações importadas! Reinicie o overlay para aplicar."
+                                        else "Falha ao importar: ${r.exceptionOrNull()?.message}",
+                                        Toast.LENGTH_LONG
+                                    ).show()
+                                    if (r.isSuccess) navController.navigate(route = MainScreen)
+                                }
+                            },
                             onSave = {
                                 viewModel.saveKeyConfig(it)
                                 Toast.makeText(

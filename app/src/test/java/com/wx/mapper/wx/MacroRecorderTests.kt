@@ -1,6 +1,7 @@
 package com.wx.mapper.wx
 
 import androidx.compose.ui.geometry.Offset
+import com.wx.mapper.data.local.toJsonText
 import com.wx.mapper.macros.MacroAction
 import com.wx.mapper.macros.MacroRecorder
 import org.junit.Assert.assertEquals
@@ -64,5 +65,25 @@ class MacroTriggersTests {
     fun returns_null_when_everything_is_taken() {
         val all = (android.view.KeyEvent.KEYCODE_F1..android.view.KeyEvent.KEYCODE_F12).toSet()
         assertEquals(null, com.wx.mapper.macros.MacroTriggers.nextFree(all))
+    }
+}
+
+class BackupTests {
+    @Test
+    fun backup_round_trips_config_and_macros() {
+        val macro = com.wx.mapper.macros.Macro(
+            id = 1, name = "teste", triggerKeyCode = android.view.KeyEvent.KEYCODE_F7,
+            actions = listOf(MacroAction.Tap(10f, 20f, 5), MacroAction.Wait(100))
+        )
+        val config = com.wx.mapper.model.AppConfig.Default.copy(macros = listOf(macro))
+        val text = com.wx.mapper.data.local.WxBackup(config = config).toJsonText()
+        val back = com.wx.mapper.data.local.parseBackup(text)
+        assertEquals(listOf(macro), back.config.macros)
+    }
+
+    @Test
+    fun rejects_files_that_are_not_a_backup() {
+        val failed = runCatching { com.wx.mapper.data.local.parseBackup("{\"foo\": 1}") }.isFailure
+        assertTrue(failed)
     }
 }

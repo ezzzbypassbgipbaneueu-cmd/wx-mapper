@@ -61,7 +61,7 @@ class WxTests {
 
     @Test
     fun cps_is_clamped() {
-        assertEquals(50f, AutoClickerConfig(cps = 9999f).sanitized().cps)
+        assertEquals(200f, AutoClickerConfig(cps = 9999f).sanitized().cps)
         assertEquals(1f, AutoClickerConfig(cps = 0f).sanitized().cps)
     }
 

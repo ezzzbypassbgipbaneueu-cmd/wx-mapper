@@ -103,6 +103,31 @@ class MainActivityViewModel @Inject constructor(
         }
     }
 
+    fun exportBackup(uri: Uri, onResult: (Result<Unit>) -> Unit) {
+        viewModelScope.launch {
+            val result = runCatching {
+                val text = dataStoreManager.exportBackup()
+                withContext(Dispatchers.IO) {
+                    context.contentResolver.openOutputStream(uri, "wt")!!.use { it.write(text.toByteArray()) }
+                }
+            }
+            onResult(result)
+        }
+    }
+
+    fun importBackup(uri: Uri, onResult: (Result<Unit>) -> Unit) {
+        viewModelScope.launch {
+            val result = runCatching {
+                val text = withContext(Dispatchers.IO) {
+                    context.contentResolver.openInputStream(uri)!!.use { it.readBytes().decodeToString() }
+                }
+                dataStoreManager.importBackup(text)
+                _addedPackages.value = dataStoreManager.getList(DataStoreManager.ADDED_PACKAGES).first()
+            }
+            onResult(result)
+        }
+    }
+
     fun removePackages(packages: Collection<Int>) {
         viewModelScope.launch {
             _addedPackages.value = _addedPackages.value.filterIndexed { index, packageName ->

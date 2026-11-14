@@ -94,7 +94,9 @@ fun SettingsScreen(
     /** Aplica e SALVA na hora só as mudanças do cursor, sem precisar apertar "Save". */
     onApplyCursor: ((AppConfig) -> AppConfig) -> Unit = {},
     onNavigateBack: () -> Unit = {},
-    onNavigateAbout: () -> Unit = {}
+    onNavigateAbout: () -> Unit = {},
+    onExportBackup: (Uri) -> Unit = {},
+    onImportBackup: (Uri) -> Unit = {}
 ) {
     var newConfig by remember { mutableStateOf(appConfig) }
     Scaffold(
@@ -617,6 +619,28 @@ fun SettingsScreen(
                             }
                         }
 
+                    }
+                }
+                val exportLauncher = rememberLauncherForActivityResult(
+                    ActivityResultContracts.CreateDocument("application/json")
+                ) { uri -> uri?.let(onExportBackup) }
+                val importLauncher = rememberLauncherForActivityResult(
+                    ActivityResultContracts.OpenDocument()
+                ) { uri -> uri?.let(onImportBackup) }
+                Card {
+                    Column(
+                        Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text("Backup das configurações", style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            "Exporta tudo (botões de cada jogo, macros, autoclicker, cursor…) para um arquivo .json. Importe esse arquivo em outro aparelho para restaurar.",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FilledTonalButton(onClick = { exportLauncher.launch("wx-mapper-config.json") }) { Text("Exportar") }
+                            FilledTonalButton(onClick = { importLauncher.launch(arrayOf("*/*")) }) { Text("Importar") }
+                        }
                     }
                 }
                 FilledTonalButton(modifier = Modifier.fillMaxWidth(), onClick = {

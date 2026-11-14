@@ -35,7 +35,7 @@ data class AutoClickerConfig(
 
     companion object {
         const val MIN_CPS = 1f
-        const val MAX_CPS = 50f
+        const val MAX_CPS = 200f
         const val DEFAULT_CPS = 30f
         const val MIN_HOLD_MS = 0L
         const val MAX_HOLD_MS = 30L
