@@ -27,12 +27,18 @@ data class AutoClickerConfig(
      * true = ALTERNAR: um clique no botão liga o autoclicker, outro clique desliga.
      */
     val toggleMode: Boolean = false,
+    /** Quanto tempo o dedo fica "apertado" em cada clique (ms). Menor = solta mais rápido. */
+    val holdMs: Long = DEFAULT_HOLD_MS,
 ) {
-    fun sanitized(): AutoClickerConfig = copy(cps = cps.coerceIn(MIN_CPS, MAX_CPS))
+    fun sanitized(): AutoClickerConfig =
+        copy(cps = cps.coerceIn(MIN_CPS, MAX_CPS), holdMs = holdMs.coerceIn(MIN_HOLD_MS, MAX_HOLD_MS))
 
     companion object {
         const val MIN_CPS = 1f
         const val MAX_CPS = 50f
         const val DEFAULT_CPS = 30f
+        const val MIN_HOLD_MS = 1L
+        const val MAX_HOLD_MS = 30L
+        const val DEFAULT_HOLD_MS = 3L
     }
 }

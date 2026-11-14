@@ -20,6 +20,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Image
+import com.wx.mapper.util.keyCodeToString
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Box
@@ -351,7 +352,22 @@ class FloatingBubbleService : Service() {
                 val windowOrigin by stateManager.get().windowOrigin.collectAsState()
                 val isTyping by stateManager.get().isTypingMode.collectAsState()
                 val isRecording by stateManager.get().recordingMode.collectAsState()
+                val macroRecording by stateManager.get().macroRecording.collectAsState()
                 Box {
+                    if (macroRecording && !isRecording) {
+                        androidx.compose.material3.Text(
+                            "● GRAVANDO MACRO — aperte ${keysConfig.macroRecordKeyCode.keyCodeToString()} para parar",
+                            color = androidx.compose.ui.graphics.Color.White,
+                            fontSize = androidx.compose.ui.unit.TextUnit(12f, androidx.compose.ui.unit.TextUnitType.Sp),
+                            modifier = Modifier
+                                .padding(8.dp)
+                                .background(
+                                    androidx.compose.ui.graphics.Color(0xCCD32F2F),
+                                    androidx.compose.foundation.shape.RoundedCornerShape(8.dp)
+                                )
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
+                    }
                     // Modo gravação / opacidade 0: esconde botões E cursor virtual.
                     if (!isBubbleExpanded && (itemsContainerOpacity == 0f || isRecording))
                         return@Box

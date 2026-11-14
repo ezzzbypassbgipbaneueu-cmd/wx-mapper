@@ -99,7 +99,16 @@ fun MacrosScreen(
             )
             if (editing == null) {
                 GlassCard {
-                    Text("Jeito fácil: dentro do jogo aperte F8, faça os cliques/teclas que quer repetir e aperte F8 de novo. A macro é salva aqui com posições e tempos.")
+                    Text("Como criar uma macro sem digitar nada", style = MaterialTheme.typography.titleSmall)
+                    Text(
+                        "1. Abra o jogo pelo launcher.\n" +
+                        "2. Aperte F8 — aparece \"GRAVANDO\" na tela.\n" +
+                        "3. Faça o que quer repetir: cliques do mouse esquerdo e teclas que você mapeou.\n" +
+                        "4. Aperte F8 de novo. A macro é salva aqui, já com uma tecla pronta (ex.: F7).\n" +
+                        "5. No jogo, aperte essa tecla para rodar e aperte de novo para parar.\n" +
+                        "Depois, aqui, você pode ligar o loop, deixar 2x mais rápida/lenta ou ajustar cada toque.",
+                        style = MaterialTheme.typography.bodySmall
+                    )
                 }
                 if (macros.isEmpty()) Text("Nenhuma macro ainda. Grave com F8 ou toque em + para criar na mão.")
                 LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -166,6 +175,12 @@ private fun MacroEditor(macro: Macro, onChange: (Macro) -> Unit) {
                     }
                     if (macro.triggerKeyCode != null) TextButton({ onChange(macro.copy(triggerKeyCode = null)) }) { Text("Limpar") }
                 }
+                if (macro.actions.isNotEmpty()) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = { onChange(macro.scaled(0.5)) }) { Text("2x mais rápida") }
+                        OutlinedButton(onClick = { onChange(macro.scaled(2.0)) }) { Text("2x mais lenta") }
+                    }
+                }
             }
         }
         item {
@@ -186,25 +201,65 @@ private fun MacroEditor(macro: Macro, onChange: (Macro) -> Unit) {
                         onChange(macro.copy(actions = macro.actions + MacroAction.Wait((ms.toLongOrNull() ?: 100L).coerceAtLeast(1))))
                     }) { Text("Esperar ms") }
                 }
+                Button(onClick = {
+                    val fx = x.toFloatOrNull(); val fy = y.toFloatOrNull()
+                    if (fx != null && fy != null)
+                        onChange(
+                            macro.copy(
+                                loop = true,
+                                actions = macro.actions + MacroAction.Tap(fx, fy, 30L) +
+                                    MacroAction.Wait((ms.toLongOrNull() ?: 100L).coerceAtLeast(1))
+                            )
+                        )
+                }) { Text("Clique repetido em X,Y (a cada ms)") }
             }
         }
         itemsIndexedActions(macro, onChange)
     }
 }
 
+private fun Macro.scaled(factor: Double): Macro = copy(actions = actions.map {
+    when (it) {
+        is MacroAction.Tap -> it.copy(holdMs = (it.holdMs * factor).toLong().coerceIn(1L, 3_600_000L))
+        is MacroAction.Wait -> it.copy(ms = (it.ms * factor).toLong().coerceIn(1L, 3_600_000L))
+    }
+})
+
+@Composable
+private fun NumField(value: Long, label: String, modifier: Modifier, onValue: (Long) -> Unit) {
+    var text by remember(value) { mutableStateOf(value.toString()) }
+    OutlinedTextField(
+        text,
+        { t ->
+            val digits = t.filter(Char::isDigit).take(6)
+            text = digits
+            onValue(digits.toLongOrNull() ?: 0L)
+        },
+        label = { Text(label) }, singleLine = true, modifier = modifier
+    )
+}
+
 private fun androidx.compose.foundation.lazy.LazyListScope.itemsIndexedActions(macro: Macro, onChange: (Macro) -> Unit) {
     items(macro.actions.size) { i ->
         val a = macro.actions[i]
+        fun replace(n: MacroAction) =
+            onChange(macro.copy(actions = macro.actions.mapIndexed { j, old -> if (j == i) n else old }))
         GlassCard {
             Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                Text(
-                    "${i + 1}. " + when (a) {
-                        is MacroAction.Tap -> "Toque (${a.x.toInt()}, ${a.y.toInt()}) ${a.holdMs} ms"
-                        is MacroAction.Wait -> "Esperar ${a.ms} ms"
-                    }, Modifier.weight(1f)
-                )
+                Text("${i + 1}. " + if (a is MacroAction.Tap) "Toque" else "Esperar", Modifier.weight(1f))
                 IconButton(onClick = { onChange(macro.copy(actions = macro.actions.filterIndexed { j, _ -> j != i })) }) {
                     Icon(Icons.Rounded.Delete, "Remover ação")
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                when (a) {
+                    is MacroAction.Tap -> {
+                        NumField(a.x.toLong(), "X", Modifier.weight(1f)) { replace(a.copy(x = it.toFloat())) }
+                        NumField(a.y.toLong(), "Y", Modifier.weight(1f)) { replace(a.copy(y = it.toFloat())) }
+                        NumField(a.holdMs, "segura ms", Modifier.weight(1f)) { replace(a.copy(holdMs = it.coerceAtLeast(1L))) }
+                    }
+                    is MacroAction.Wait ->
+                        NumField(a.ms, "ms", Modifier.weight(1f)) { replace(a.copy(ms = it.coerceAtLeast(1L))) }
                 }
             }
         }

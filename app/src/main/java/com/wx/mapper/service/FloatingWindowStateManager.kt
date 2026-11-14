@@ -19,6 +19,8 @@ import com.wx.mapper.model.DraggableItemType
 import com.wx.mapper.domain.EventHandler
 import com.wx.mapper.input.WxRuntime
 import com.wx.mapper.macros.Macro
+import com.wx.mapper.macros.MacroTriggers
+import com.wx.mapper.util.keyCodeToString
 import android.widget.Toast
 import com.wx.mapper.service.TypingState
 import com.wx.mapper.data.external.ShizukuSystemServerAPi
@@ -84,6 +86,8 @@ class FloatingWindowStateManager @Inject constructor(
 
     private val _appConfig =MutableStateFlow(AppConfig.Default)
     val keysConfig = _appConfig.asStateFlow()
+    /** true enquanto uma macro está sendo gravada (mostra o aviso GRAVANDO no overlay). */
+    val macroRecording get() = eventHandler.recorder.isRecording
 
 
     private val _isBubbleExpanded = MutableStateFlow(false)
@@ -285,11 +289,23 @@ class FloatingWindowStateManager @Inject constructor(
         }
         val current = _appConfig.value
         val id = (current.macros.maxOfOrNull { it.id } ?: 0) + 1
-        val updated = current.copy(macros = current.macros + Macro(id = id, name = "Gravação $id", actions = recorded))
+        val used = buildSet {
+            current.macros.forEach { m -> m.triggerKeyCode?.let { add(it) } }
+            add(current.macroRecordKeyCode)
+            add(current.typingModeKeyCode)
+            add(current.recordingModeKeyCode)
+            add(current.shootingModeKeyCode)
+        }
+        val trigger = MacroTriggers.nextFree(used)
+        val updated = current.copy(
+            macros = current.macros + Macro(id = id, name = "Gravação $id", triggerKeyCode = trigger, actions = recorded)
+        )
         _appConfig.value = updated
         eventHandler.appConfig = updated
         scope.launch { dataStoreManager.save(DataStoreManager.KEYS_CONFIG, updated) }
-        Toast.makeText(context, "Macro salva com $taps toques.", Toast.LENGTH_SHORT).show()
+        val how = trigger?.let { "Aperte ${it.keyCodeToString()} para rodar (e de novo para parar)." }
+            ?: "Defina uma tecla na tela de Macros."
+        Toast.makeText(context, "Macro salva ($taps toques). $how", Toast.LENGTH_LONG).show()
     }
 
     fun toggleRecordingMode() {
@@ -328,10 +344,16 @@ class FloatingWindowStateManager @Inject constructor(
                 // Pointer capture delivers relative deltas. rawX/rawY are absolute screen
                 // coordinates and must never be accumulated as movement.
                 val sensitivityNow = 10f * pointerSensitivity.value
-                val delta = Offset(
-                    motionEvent.getAxisValue(MotionEvent.AXIS_RELATIVE_X),
-                    motionEvent.getAxisValue(MotionEvent.AXIS_RELATIVE_Y)
-                ) * sensitivityNow
+                // O Android junta (batch) vários movimentos do mouse em um único evento quando o
+                // FPS está baixo: o evento traz só o último delta e o resto vem em "histórico".
+                // Somamos tudo; antes só o último era usado e o cursor ficava lento com FPS baixo.
+                var relX = motionEvent.getAxisValue(MotionEvent.AXIS_RELATIVE_X)
+                var relY = motionEvent.getAxisValue(MotionEvent.AXIS_RELATIVE_Y)
+                for (h in 0 until motionEvent.historySize) {
+                    relX += motionEvent.getHistoricalAxisValue(MotionEvent.AXIS_RELATIVE_X, h)
+                    relY += motionEvent.getHistoricalAxisValue(MotionEvent.AXIS_RELATIVE_Y, h)
+                }
+                val delta = Offset(relX, relY) * sensitivityNow
 
                 if (!isShootingMode.value) {
                     val oldPosition = _mousePointerOffset.value

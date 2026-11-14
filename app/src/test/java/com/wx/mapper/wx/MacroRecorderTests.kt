@@ -46,3 +46,23 @@ class MacroRecorderTests {
         assertEquals(listOf<MacroAction>(MacroAction.Tap(5f, 6f, 40)), result)
     }
 }
+
+class MacroTriggersTests {
+    @Test
+    fun picks_first_free_function_key() {
+        assertEquals(
+            android.view.KeyEvent.KEYCODE_F7,
+            com.wx.mapper.macros.MacroTriggers.nextFree(emptySet())
+        )
+        assertEquals(
+            android.view.KeyEvent.KEYCODE_F6,
+            com.wx.mapper.macros.MacroTriggers.nextFree(setOf(android.view.KeyEvent.KEYCODE_F7))
+        )
+    }
+
+    @Test
+    fun returns_null_when_everything_is_taken() {
+        val all = (android.view.KeyEvent.KEYCODE_F1..android.view.KeyEvent.KEYCODE_F12).toSet()
+        assertEquals(null, com.wx.mapper.macros.MacroTriggers.nextFree(all))
+    }
+}
