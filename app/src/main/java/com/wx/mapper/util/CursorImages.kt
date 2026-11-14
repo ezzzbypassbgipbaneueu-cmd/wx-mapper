@@ -18,12 +18,20 @@ object CursorImages {
         File(context.filesDir, "cursors").apply { mkdirs() }
 
     fun list(context: Context): List<File> {
-        val gallery = dir(context).listFiles { f -> f.isFile && f.name.endsWith(".png") }.orEmpty()
+        val gallery = dir(context).listFiles()
+            ?.filter { file -> file.isFile && file.name.endsWith(".png", ignoreCase = true) }
+            .orEmpty()
+
         // imagens da versão anterior (ficavam direto em filesDir)
-        val legacy = context.filesDir.listFiles { f ->
-            f.isFile && f.name.startsWith("cursor_custom_") && f.name.endsWith(".png")
-        }.orEmpty()
-        return (gallery + legacy).sortedBy { it.lastModified() }
+        val legacy = context.filesDir.listFiles()
+            ?.filter { file ->
+                file.isFile &&
+                    file.name.startsWith("cursor_custom_") &&
+                    file.name.endsWith(".png", ignoreCase = true)
+            }
+            .orEmpty()
+
+        return (gallery + legacy).sortedBy { file -> file.lastModified() }
     }
 
     /** Copia a imagem escolhida (reduzida e em PNG) para a galeria e devolve o arquivo. */
