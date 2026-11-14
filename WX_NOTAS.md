@@ -1,9 +1,9 @@
-# WX MAPPER (base: KeySync, Apache-2.0)
+# WX MAPPER
 
-Fork do KeySync (github.com/aka-munan/keysync) com package `com.wx.mapper`.
+Package `com.wx.mapper`.
 
 ## O que foi adicionado (código real, ligado ao injetor Shizuku já existente)
-- `autoclicker/` — AutoClicker (CPS 1–50, padrão 30; gatilho padrão: botão direito; segura = clica, solta = para).
+- `autoclicker/` — AutoClicker (CPS 1–200, padrão 30; gatilho padrão: botão direito; segura = clica, solta = para).
 - `macros/` — Macro, MacroAction (Tap / Wait), MacroPlayer (loop, parada segura).
 - `input/WxActions` — liga teclas/botões do mouse ao autoclicker e às macros; rede de segurança via `buttonState`.
 - `input/WxRuntime` — ponte serviço de overlay ⇄ telas.

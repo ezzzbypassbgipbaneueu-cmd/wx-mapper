@@ -182,8 +182,7 @@ class MainActivity : ComponentActivity() {
                     }
                     composable<AboutScreen> {
                         AboutScreen(
-                            onNavigateBack = navController::popBackStack,
-                            onOpenGithub = viewModel::openGithub
+                            onNavigateBack = navController::popBackStack
                         )
                     }
                 }

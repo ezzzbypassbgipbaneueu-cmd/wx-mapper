@@ -45,14 +45,13 @@ import com.wx.mapper.R
 @Preview
 @Composable
 fun PreviewAboutScreen(){
-    AboutScreen(onNavigateBack = {}) {  }
+    AboutScreen(onNavigateBack = {})
 }
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AboutScreen(
     modifier: Modifier = Modifier,
-    onNavigateBack: () -> Unit ,
-    onOpenGithub:()->Unit
+    onNavigateBack: () -> Unit
 ) {
     Scaffold(modifier = modifier,
         topBar = {
@@ -98,39 +97,6 @@ fun AboutScreen(
                     .align(Alignment.CenterHorizontally)
                     .padding(bottom = 16.dp)
             )
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                FilledTonalButton(modifier = Modifier, onClick = onOpenGithub) {
-                    Icon(painterResource(R.drawable.github), contentDescription = null)
-                    Text(modifier = Modifier.padding(start = 16.dp), text = "Github")
-                }
-//                FilledTonalButton(modifier = Modifier, onClick = {}) {
-//                    Icon(painterResource(R.drawable.apk_document), contentDescription = null)
-//                    Text(modifier = Modifier.padding(start = 16.dp), text = "F-Droid")
-//                }
-            }
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-                    Text(
-                        "Reach Me",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Text(
-                        "akamunan@yahoo.com",
-                        modifier = Modifier
-                            .clickable { }
-                            .padding(top = 8.dp),
-                        color = MaterialTheme.colorScheme.primary,
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                }
-            }
         }
     }
 }

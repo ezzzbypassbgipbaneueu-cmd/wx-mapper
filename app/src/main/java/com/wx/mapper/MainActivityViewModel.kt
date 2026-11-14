@@ -253,14 +253,6 @@ class MainActivityViewModel @Inject constructor(
         return true
     }
 
-    fun openGithub() {
-        val url = "https://github.com/aka-munan/keysync"
-        val i = Intent(Intent.ACTION_VIEW)
-        i.setData(Uri.parse(url))
-        i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        context.startActivity(i)
-    }
-
     sealed interface UiState {
         data object ShizukuNotRunning : UiState
         data class ShizukuRunning(val binder: IBinder) : UiState
