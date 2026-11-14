@@ -28,7 +28,7 @@ class DataStoreManager @Inject constructor(private val context: Context) {
     }
     
     fun getButtonsConfigKeys(): Flow<List<Preferences.Key<String>>> {
-       return context.datastore.data.map { it.asMap().keys.map { it as Preferences.Key<String> }.filter { prefKey->prefKey.name.startsWith("buttons_config") } }
+       return context.datastore.data.map { it.asMap().keys.filter { prefKey -> prefKey.name.startsWith("buttons_config") }.map { prefKey -> stringPreferencesKey(prefKey.name) } }
     }
 
     suspend fun remove(key: Preferences.Key<String>) {
