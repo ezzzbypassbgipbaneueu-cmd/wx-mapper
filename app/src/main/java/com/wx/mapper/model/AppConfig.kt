@@ -17,6 +17,17 @@ const val BUTTON_BASE_SCALE = 0.5f
 /** Escala visual final dos botões: escolha do usuário (Settings) x tamanho base reduzido. */
 fun AppConfig.visualButtonScale(): Float = buttonScale.coerceIn(0.35f, 2f) * BUTTON_BASE_SCALE
 
+/** Estratégia do modo gravação. */
+@Serializable
+enum class RecordingHideMode {
+    /** Bolha e botões somem (para todos); o cursor continua visível. Sempre funciona. */
+    BUTTONS_ONLY,
+    /** Tudo visível para você; a camada do overlay é marcada SKIP_SCREENSHOT (API oculta). */
+    SKIP_SCREENSHOT,
+    /** Tudo visível para você; janelas do overlay com FLAG_SECURE (pode gravar preto). */
+    FLAG_SECURE,
+}
+
 @Serializable
 data class AppConfig(
     val shootingModeKeyCode: Int,
@@ -47,13 +58,8 @@ data class AppConfig(
     val recordingModeKeyCode: Int = KeyEvent.KEYCODE_F10,
     /** Tecla que começa/termina a gravação de uma macro (dentro do jogo). */
     val macroRecordKeyCode: Int = KeyEvent.KEYCODE_F8,
-    /**
-     * Modo gravação com FLAG_SECURE (experimental): cursor e botões continuam visíveis para
-     * o usuário, mas as janelas do overlay são marcadas como seguras e o sistema as omite
-     * (ou pinta de preto) nas gravações/capturas de tela. false = botões e bolha somem,
-     * o cursor continua aparecendo.
-     */
-    val recordingSecureWindow: Boolean = false,
+    /** Como o modo gravação esconde o overlay da gravação de tela. */
+    val recordingHideMode: RecordingHideMode = RecordingHideMode.BUTTONS_ONLY,
 ) {
     companion object {
         val Default = AppConfig(

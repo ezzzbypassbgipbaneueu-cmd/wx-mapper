@@ -77,6 +77,8 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import com.wx.mapper.model.RecordingHideMode
+import com.wx.mapper.util.ScreenshotExclusion
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -108,6 +110,18 @@ class FloatingBubbleService : Service() {
     private lateinit var itemsContainerLP: WindowManager.LayoutParams
     /** true enquanto o modo gravação está ligado com FLAG_SECURE nas janelas do overlay. */
     private var secureActive = false
+    /** true enquanto o modo gravação está ligado com SKIP_SCREENSHOT. */
+    private var skipActive = false
+    private var skipApplied = false
+    /** SKIP_SCREENSHOT não funcionou: o overlay cai no modo "só botões". */
+    private val skipFailed = MutableStateFlow(false)
+
+    private fun applySkip(skip: Boolean): Boolean {
+        var ok = true
+        containerRoot?.let { ok = ScreenshotExclusion.setSkip(it, skip) && ok }
+        floatingBubbleView?.let { ok = ScreenshotExclusion.setSkip(it, skip) && ok }
+        return ok
+    }
     private var floatingBubbleView: ComposeView? = null
 
 
@@ -221,6 +235,7 @@ class FloatingBubbleService : Service() {
                 val loc = IntArray(2)
                 v.getLocationOnScreen(loc)
                 stateManager.get().onOverlayWindowPositioned(loc[0], loc[1])
+                if (skipActive) ScreenshotExclusion.setSkip(v, true)
             }
         }
 
@@ -248,18 +263,42 @@ class FloatingBubbleService : Service() {
             ) { expanded, typing -> expanded to typing }
                 .collect { (expanded, typing) -> applyOverlayMode(expanded, typing) }
         }
+        // Reaplica SKIP_SCREENSHOT se o sistema recriar a camada (relayout) durante a gravação.
+        floatingBubbleView?.addOnLayoutChangeListener { v, _, _, _, _, _, _, _, _ ->
+            if (skipActive) ScreenshotExclusion.setSkip(v, true)
+        }
         scope.launch {
-            // Modo gravação. Dois jeitos (config "recordingSecureWindow"):
-            //  - normal: a bolha e os botões somem; o cursor continua visível para você.
-            //  - seguro (experimental): tudo continua visível para você, mas as janelas do overlay
-            //    recebem FLAG_SECURE para o sistema omiti-las da gravação.
+            // Modo gravação (config "recordingHideMode"):
+            //  - BUTTONS_ONLY: bolha e botões somem; o cursor continua visível.
+            //  - SKIP_SCREENSHOT: tudo visível para você; a camada do overlay é excluída da captura
+            //    (API oculta; se falhar, cai em BUTTONS_ONLY).
+            //  - FLAG_SECURE: tudo visível; janelas do overlay seguras (pode gravar preto).
             combine(
                 stateManager.get().recordingMode,
-                stateManager.get().keysConfig.map { it.recordingSecureWindow }.distinctUntilChanged()
-            ) { recording, secure -> recording to secure }
-                .collect { (recording, secure) ->
-                    val hide = recording && !secure
-                    secureActive = recording && secure
+                stateManager.get().keysConfig.map { it.recordingHideMode }.distinctUntilChanged()
+            ) { recording, mode -> recording to mode }
+                .collect { (recording, mode) ->
+                    secureActive = recording && mode == RecordingHideMode.FLAG_SECURE
+                    skipActive = recording && mode == RecordingHideMode.SKIP_SCREENSHOT
+                    var hide = recording && mode == RecordingHideMode.BUTTONS_ONLY
+                    if (skipActive) {
+                        // Pequeno atraso: a camada precisa existir/estar desenhada.
+                        kotlinx.coroutines.delay(50)
+                        val ok = applySkip(true)
+                        skipApplied = ok
+                        skipFailed.value = !ok
+                        if (!ok) {
+                            hide = true
+                            android.widget.Toast.makeText(
+                                this@FloatingBubbleService,
+                                "SKIP_SCREENSHOT indisponível neste aparelho: escondendo só os botões.",
+                                android.widget.Toast.LENGTH_LONG
+                            ).show()
+                        }
+                    } else {
+                        skipFailed.value = false
+                        if (skipApplied) { applySkip(false); skipApplied = false }
+                    }
                     val wm = stateManager.get().windowManager
                     floatingBubbleView?.visibility = if (hide) View.INVISIBLE else View.VISIBLE
                     floatingBubbleView?.let { v ->
@@ -379,9 +418,12 @@ class FloatingBubbleService : Service() {
                 val windowOrigin by stateManager.get().windowOrigin.collectAsState()
                 val isTyping by stateManager.get().isTypingMode.collectAsState()
                 val isRecording by stateManager.get().recordingMode.collectAsState()
+                val skipFailedState by skipFailed.collectAsState()
+                // true = botões/cursor continuam desenhados no modo gravação (escondidos pelo sistema).
+                val keepHud = keysConfig.recordingHideMode != RecordingHideMode.BUTTONS_ONLY && !skipFailedState
                 val macroRecording by stateManager.get().macroRecording.collectAsState()
                 Box {
-                    if (macroRecording && (!isRecording || keysConfig.recordingSecureWindow)) {
+                    if (macroRecording && (!isRecording || keepHud)) {
                         androidx.compose.material3.Text(
                             "● GRAVANDO MACRO — aperte ${keysConfig.macroRecordKeyCode.keyCodeToString()} para parar",
                             color = androidx.compose.ui.graphics.Color.White,
@@ -412,8 +454,8 @@ class FloatingBubbleService : Service() {
                             windowOrigin = windowOrigin
                         )
                     }
-                    // Modo gravação normal: só os botões somem. No modo seguro eles ficam (FLAG_SECURE).
-                    if (!isBubbleExpanded && isRecording && !keysConfig.recordingSecureWindow)
+                    // Modo gravação "só botões": os botões somem. Nos outros modos o sistema os omite da gravação.
+                    if (!isBubbleExpanded && isRecording && !keepHud)
                         return@Box
                     ItemsContainer(
                         Modifier.alpha(if (isBubbleExpanded) 1f else itemsContainerOpacity),

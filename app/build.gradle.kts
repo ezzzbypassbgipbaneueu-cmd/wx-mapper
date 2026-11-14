@@ -81,6 +81,8 @@ dependencies {
     implementation(libs.androidx.material3)
     implementation(libs.androidx.constraintlayout.compose)
     implementation(libs.api)
+    // Libera APIs ocultas do Android (usado só pelo modo gravação SKIP_SCREENSHOT).
+    implementation("org.lsposed.hiddenapibypass:hiddenapibypass:4.3")
     implementation(libs.provider)
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     testImplementation(libs.junit)

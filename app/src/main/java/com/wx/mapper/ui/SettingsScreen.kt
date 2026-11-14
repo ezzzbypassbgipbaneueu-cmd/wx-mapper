@@ -78,6 +78,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.constraintlayout.compose.ConstraintLayout
 import com.wx.mapper.model.AppConfig
+import com.wx.mapper.model.RecordingHideMode
 import com.wx.mapper.model.ThemePreference
 import com.wx.mapper.model.TouchMode
 import com.wx.mapper.util.capitalizeFirst
@@ -401,45 +402,28 @@ fun SettingsScreen(
                             newConfig = newConfig.copy(recordingModeKeyCode = it.nativeKeyEvent.keyCode)
                             return@KeyConfigTextField true
                         }
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Column(Modifier.weight(1f)) {
-                                Text("Ocultar só da gravação (experimental)", style = MaterialTheme.typography.titleMedium)
-                                Text(
-                                    "Cursor e botões continuam aparecendo para você, mas o overlay usa FLAG_SECURE para sumir da gravação. Em alguns aparelhos/gravadores a gravação pode sair com área preta; se acontecer, desligue.",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                        Text("Como esconder", style = MaterialTheme.typography.titleMedium)
+                        listOf(
+                            RecordingHideMode.BUTTONS_ONLY to "Só botões e bolha (cursor continua na gravação)",
+                            RecordingHideMode.SKIP_SCREENSHOT to "Tudo visível pra mim, fora da gravação (SKIP_SCREENSHOT, experimental)",
+                            RecordingHideMode.FLAG_SECURE to "Tudo visível pra mim, fora da gravação (FLAG_SECURE, pode gravar preto)",
+                        ).forEach { (mode, label) ->
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.clickable { newConfig = newConfig.copy(recordingHideMode = mode) }
+                            ) {
+                                androidx.compose.material3.RadioButton(
+                                    selected = newConfig.recordingHideMode == mode,
+                                    onClick = { newConfig = newConfig.copy(recordingHideMode = mode) }
                                 )
+                                Text(label, style = MaterialTheme.typography.bodyMedium)
                             }
-                            Switch(
-                                checked = newConfig.recordingSecureWindow,
-                                onCheckedChange = { newConfig = newConfig.copy(recordingSecureWindow = it) }
-                            )
                         }
-                    }
-                }
-                Card(modifier = Modifier.fillMaxWidth()) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(
-                            Modifier
-                                .fillMaxWidth()
-                                .weight(1f)
-                        ) {
-                            Text(
-                                "Delete data",
-                                style = MaterialTheme.typography.titleLarge,
-                                fontWeight = FontWeight.Medium,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                            Text(
-                                modifier = Modifier.padding(top = 8.dp),
-                                text = "Delete Keymapping for removed apps",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
+                        Text(
+                            "SKIP_SCREENSHOT usa APIs ocultas do Android e pode não funcionar em todos os aparelhos ou gravadores; se falhar, o app esconde só os botões.",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                         Switch(checked = newConfig.deleteDataOnRemove, onCheckedChange = {
                             newConfig = newConfig.copy(deleteDataOnRemove = it)
                         })
