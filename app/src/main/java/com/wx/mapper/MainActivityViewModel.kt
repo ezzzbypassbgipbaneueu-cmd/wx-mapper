@@ -68,7 +68,10 @@ class MainActivityViewModel @Inject constructor(
         getConnectedExternalDevices()
         viewModelScope.launch {
             _addedPackages.value = dataStoreManager.getList(DataStoreManager.ADDED_PACKAGES).first()
-            _appConfig.value = dataStoreManager.getKeyConfig(DataStoreManager.KEYS_CONFIG).first()
+        }
+        viewModelScope.launch {
+            // Mudanças feitas pelo overlay (ex.: macro gravada) aparecem nas telas na hora.
+            dataStoreManager.getKeyConfig(DataStoreManager.KEYS_CONFIG).collect { _appConfig.value = it }
         }
     }
 

@@ -7,6 +7,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.nativeKeyCode
 import com.wx.mapper.input.WxActions
+import com.wx.mapper.macros.MacroRecorder
 import com.wx.mapper.model.AppConfig
 import com.wx.mapper.model.DraggableItem
 import com.wx.mapper.model.DraggableItemType
@@ -91,6 +92,9 @@ class EventHandler(
     /** Posição atual do cursor virtual; usada pelo autoclicker no modo "seguir ponteiro". */
     var pointerPositionProvider: (() -> Offset)? = null
 
+    /** Grava toques (mouse esquerdo e teclas mapeadas) para virar macro. */
+    val recorder = MacroRecorder()
+
     val wx = WxActions(eventInjector, { pointerPositionProvider?.invoke() ?: mousePointerPosition })
 
     var appConfig = AppConfig.Default
@@ -146,7 +150,11 @@ class EventHandler(
         }
         if (event.keyCode !in pressedKeys.indices) return false
 
-        val wasdBit = keyToWasdMask(event.keyCode)
+        // W/A/S/D só viram joystick se existir um grupo WASD no layout e a tecla não tiver
+        // botão próprio. Senão são teclas comuns e podem ser mapeadas uma a uma (antes eram
+        // sempre tratadas como joystick e, sem grupo, o botão mapeado em W/A/S/D nunca disparava).
+        val wasdBit = if (pointerIds[KEYCODE_WASD] != -1 && !keyMap.containsKey(event.keyCode))
+            keyToWasdMask(event.keyCode) else 0
         val pointerIdKey = if (wasdBit != 0) KEYCODE_WASD else event.keyCode
         val pointerId = pointerIds[pointerIdKey]
         if (wasdBit != 0 && event.action == MotionEvent.ACTION_DOWN) {
@@ -160,6 +168,9 @@ class EventHandler(
                 if (pressedKeys[event.keyCode] || event.repeatCount > 0) return true
                 pressedKeys[event.keyCode] = true
 
+                if (wasdBit == 0 && recorder.isRecording.value) {
+                    keyMap[event.keyCode]?.let { recorder.onDown(it.tapCenter()) }
+                }
                 if (wasdBit != 0) {
                     wasdMask = wasdMask or wasdBit
                     handleWasd(pointerId)
@@ -176,6 +187,7 @@ class EventHandler(
                 if (!pressedKeys[event.keyCode]) return true
                 pressedKeys[event.keyCode] = false
 
+                if (wasdBit == 0 && recorder.isRecording.value) recorder.onUp()
                 if (wasdBit != 0) {
                     wasdMask = wasdMask and wasdBit.inv()
                     handleWasd(pointerId)
@@ -187,6 +199,9 @@ class EventHandler(
         }
         return false
     }
+
+    private fun KeyMap.tapCenter(): Offset =
+        end?.let { Offset((position.x + it.x) / 2f, (position.y + it.y) / 2f) } ?: position
 
     /* ---------- WASD ---------- */
 
@@ -285,6 +300,10 @@ class EventHandler(
             MotionEvent.BUTTON_SECONDARY -> KEYCODE_RMC
             MotionEvent.BUTTON_TERTIARY -> KEYCODE_MMC
             else -> return false
+        }
+        if (keyCode == KEYCODE_LMC && recorder.isRecording.value) {
+            if (pressed) recorder.onDown(pointerPositionProvider?.invoke() ?: mousePointerPosition)
+            else recorder.onUp()
         }
         if (keyCode == KEYCODE_LMC) wx.onPrimaryButton(pressed)
         if (wx.onTrigger(keyCode, pressed)) return true

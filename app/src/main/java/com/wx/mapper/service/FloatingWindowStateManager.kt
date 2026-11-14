@@ -18,6 +18,8 @@ import com.wx.mapper.model.DraggableItem
 import com.wx.mapper.model.DraggableItemType
 import com.wx.mapper.domain.EventHandler
 import com.wx.mapper.input.WxRuntime
+import com.wx.mapper.macros.Macro
+import android.widget.Toast
 import com.wx.mapper.service.TypingState
 import com.wx.mapper.data.external.ShizukuSystemServerAPi
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -256,11 +258,38 @@ class FloatingWindowStateManager @Inject constructor(
             if (keyEvent.action == KeyEvent.ACTION_DOWN && keyEvent.repeatCount == 0) toggleRecordingMode()
             return true
         }
+        if (keyEvent.keyCode == config.macroRecordKeyCode) {
+            if (keyEvent.action == KeyEvent.ACTION_DOWN && keyEvent.repeatCount == 0) toggleMacroRecording()
+            return true
+        }
         if (keyEvent.keyCode == config.typingModeKeyCode) {
             if (keyEvent.action == KeyEvent.ACTION_DOWN && keyEvent.repeatCount == 0) setManualTyping(true)
             return true
         }
         return eventHandler.handleKeyEvent(keyEvent)
+    }
+
+    /** Começa a gravar uma macro; ao chamar de novo, para e salva a gravação na lista de macros. */
+    fun toggleMacroRecording() {
+        val recorder = eventHandler.recorder
+        if (!recorder.isRecording.value) {
+            recorder.start()
+            Toast.makeText(context, "Gravando macro… aperte a mesma tecla para parar.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val recorded = recorder.stop()
+        val taps = recorded.count { it is com.wx.mapper.macros.MacroAction.Tap }
+        if (taps == 0) {
+            Toast.makeText(context, "Nada gravado.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val current = _appConfig.value
+        val id = (current.macros.maxOfOrNull { it.id } ?: 0) + 1
+        val updated = current.copy(macros = current.macros + Macro(id = id, name = "Gravação $id", actions = recorded))
+        _appConfig.value = updated
+        eventHandler.appConfig = updated
+        scope.launch { dataStoreManager.save(DataStoreManager.KEYS_CONFIG, updated) }
+        Toast.makeText(context, "Macro salva com $taps toques.", Toast.LENGTH_SHORT).show()
     }
 
     fun toggleRecordingMode() {

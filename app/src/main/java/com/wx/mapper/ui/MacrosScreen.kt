@@ -44,6 +44,15 @@ fun MacrosScreen(
     onSave: (AppConfig) -> Unit,
 ) {
     var macros by remember { mutableStateOf(appConfig.macros) }
+    // Macros gravadas pelo overlay chegam por appConfig com ids novos (maiores que os já vistos).
+    var seenMaxId by remember { mutableIntStateOf(appConfig.macros.maxOfOrNull { it.id } ?: 0) }
+    LaunchedEffect(appConfig.macros) {
+        val fresh = appConfig.macros.filter { it.id > seenMaxId }
+        if (fresh.isNotEmpty()) {
+            macros = macros + fresh
+            seenMaxId = fresh.maxOf { it.id }
+        }
+    }
     var editingId by remember { mutableStateOf<Int?>(null) }
     val actions by WxRuntime.actions.collectAsState()
     val playingFlow = remember(actions) { actions?.macroPlayer?.playingMacroId ?: MutableStateFlow<Int?>(null) }
@@ -76,6 +85,7 @@ fun MacrosScreen(
         floatingActionButton = {
             if (editing == null) FloatingActionButton(onClick = {
                 val id = (macros.maxOfOrNull { it.id } ?: 0) + 1
+                seenMaxId = maxOf(seenMaxId, id)
                 commit(macros + Macro(id = id, name = "Macro $id"))
                 editingId = id
             }) { Icon(Icons.Rounded.Add, contentDescription = "Nova macro") }
@@ -88,7 +98,10 @@ fun MacrosScreen(
                 style = MaterialTheme.typography.bodySmall
             )
             if (editing == null) {
-                if (macros.isEmpty()) Text("Nenhuma macro ainda. Toque em + para criar.")
+                GlassCard {
+                    Text("Jeito fácil: dentro do jogo aperte F8, faça os cliques/teclas que quer repetir e aperte F8 de novo. A macro é salva aqui com posições e tempos.")
+                }
+                if (macros.isEmpty()) Text("Nenhuma macro ainda. Grave com F8 ou toque em + para criar na mão.")
                 LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     items(macros, key = { it.id }) { m ->
                         GlassCard {

@@ -45,6 +45,8 @@ data class AppConfig(
     val typingModeKeyCode: Int = KeyEvent.KEYCODE_F9,
     /** Tecla que esconde/mostra TUDO do keymapper (para gravar a tela). */
     val recordingModeKeyCode: Int = KeyEvent.KEYCODE_F10,
+    /** Tecla que começa/termina a gravação de uma macro (dentro do jogo). */
+    val macroRecordKeyCode: Int = KeyEvent.KEYCODE_F8,
 ) {
     companion object {
         val Default = AppConfig(
