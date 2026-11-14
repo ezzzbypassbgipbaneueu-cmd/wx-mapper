@@ -132,6 +132,9 @@ class MainActivity : ComponentActivity() {
                         SettingsScreen(
                             appConfig = viewModel.appConfig.value,
                             onNavigateBack = navController::popBackStack,
+                            onApplyCursor = { transform ->
+                                viewModel.saveKeyConfig(transform(viewModel.appConfig.value))
+                            },
                             onNavigateAbout = { navController.navigate(route = AboutScreen) },
                             onSave = {
                                 viewModel.saveKeyConfig(it)

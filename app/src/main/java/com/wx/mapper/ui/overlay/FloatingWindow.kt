@@ -292,19 +292,8 @@ fun ItemsContainer(
                         WASDKeysGroup(onRemove = {
                             onRemove(item.id)
                         }, modifier = Modifier
-                            .onGloballyPositioned { coordinates ->
-                                // positionOnScreen já considera a escala (Modifier.scale do pai);
-                                // a largura/altura na tela é a medida x escala.
-                                val topLeft = coordinates.positionOnScreen()
-                                val w = coordinates.size.width * scale
-                                val h = coordinates.size.height * scale
-                                item.center = topLeft + Offset(w / 2f, h / 2f)
-                                item.w = Offset(item.center.x, topLeft.y)
-                                item.a = Offset(topLeft.x, item.center.y)
-                                item.s = Offset(item.center.x, topLeft.y + h)
-                                item.d = Offset(topLeft.x + w, item.center.y)
-
-                            }, onPanIconDrag = { dragAmount ->
+                            .onSizeChanged { item.size = it.width },
+                            onPanIconDrag = { dragAmount ->
                             userScale = (userScale + (dragAmount.y / 500)).coerceIn(0.5f, 2f)
                             item.scale = userScale
                         })
@@ -679,6 +668,7 @@ fun SettingsLayout(
     onCursorColorChange: (Int) -> Unit = {},
     onCursorOpacityChange: (Float) -> Unit = {},
     cursorHasImage: Boolean = false,
+    onNextCursorImage: () -> Unit = {},
     autoTypingMode: Boolean = true,
     onAutoTypingChange: (Boolean) -> Unit = {},
     onTypingModeClick: () -> Unit = {},
@@ -793,8 +783,11 @@ fun SettingsLayout(
             onValueChange = onCursorOpacityChange,
             valueRange = 0.1f..1f
         )
+        if (cursorHasImage) {
+            TextButton(onClick = onNextCursorImage) { Text("Próxima imagem salva") }
+        }
         TextButton(onClick = onAdvancedSettingsClick) {
-            Text(if (cursorHasImage) "Trocar imagem do cursor…" else "Usar imagem como cursor…")
+            Text(if (cursorHasImage) "Gerenciar imagens do cursor…" else "Adicionar imagem de cursor…")
         }
         HorizontalDivider()
         Text(

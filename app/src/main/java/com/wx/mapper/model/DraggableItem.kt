@@ -37,9 +37,11 @@ sealed class DraggableItem {
         var a: Offset = Offset.Zero,
         var s: Offset = Offset.Zero,
         var d: Offset = Offset.Zero,
+        /** Largura medida (px) do grupo, sem escala; usada para calcular o joystick. */
+        var size: Int = 0,
     ) : DraggableItem() {
         override fun copy(id: Int, position: Offset): DraggableItem =
-            WASDGroup(id, position,scale, center, w, a, s, d)
+            WASDGroup(id, position,scale, center, w, a, s, d, size)
     }
 
     @Serializable

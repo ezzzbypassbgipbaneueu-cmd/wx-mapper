@@ -16,6 +16,7 @@ import com.wx.mapper.model.KeymapType
 import com.wx.mapper.model.MultiModeTouchHandler
 import com.wx.mapper.model.TouchMode
 import com.wx.mapper.model.visualButtonScale
+import com.wx.mapper.model.BUTTON_BASE_SCALE
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
@@ -148,6 +149,9 @@ class EventHandler(
         val wasdBit = keyToWasdMask(event.keyCode)
         val pointerIdKey = if (wasdBit != 0) KEYCODE_WASD else event.keyCode
         val pointerId = pointerIds[pointerIdKey]
+        if (wasdBit != 0 && event.action == MotionEvent.ACTION_DOWN) {
+            Log.d("WxWasd", "key=${event.keyCode} pointerId=$pointerId (-1 = sem grupo WASD mapeado)")
+        }
         if (pointerId == -1) return false
 
         when (event.action) {
@@ -385,31 +389,51 @@ class EventHandler(
         items.forEach { item ->
             when (item) {
                 is DraggableItem.WASDGroup -> {
-                    // w/a/s/d/center já vêm em coordenadas da TELA (positionOnScreen)
-                    wasdMap[MASK_W] = KeyMap(position = item.w, center = item.center)
-                    wasdMap[MASK_A] = KeyMap(position = item.a, center = item.center)
-                    wasdMap[MASK_S] = KeyMap(position = item.s, center = item.center)
-                    wasdMap[MASK_D] = KeyMap(position = item.d, center = item.center)
+                    // Mesma fonte de coordenadas das outras teclas (posição + origem da janela +
+                    // tamanho medido): é o caminho que comprovadamente acerta o lugar.
+                    // O escalonamento é feito em torno do centro, então o centro não muda.
+                    var center = item.center
+                    var w = item.w
+                    var a = item.a
+                    var s = item.s
+                    var d = item.d
+                    if (item.size > 0) {
+                        val box = item.size.toFloat()
+                        val scale = item.scale.coerceIn(0.5f, 2f) * BUTTON_BASE_SCALE
+                        val cx = item.position.x + windowOrigin.x + box / 2f
+                        val cy = item.position.y + windowOrigin.y + box / 2f
+                        val r = box * scale / 2f
+                        center = Offset(cx, cy)
+                        w = Offset(cx, cy - r)
+                        a = Offset(cx - r, cy)
+                        s = Offset(cx, cy + r)
+                        d = Offset(cx + r, cy)
+                    }
+                    Log.d("WxWasd", "WASD center=$center r=${(d.x - center.x)} size=${item.size}")
+                    wasdMap[MASK_W] = KeyMap(position = w, center = center)
+                    wasdMap[MASK_A] = KeyMap(position = a, center = center)
+                    wasdMap[MASK_S] = KeyMap(position = s, center = center)
+                    wasdMap[MASK_D] = KeyMap(position = d, center = center)
                     val wa = Offset(
-                        x = item.w.x - ((item.w.x - item.a.x) / 2),
-                        y = item.w.y + ((item.a.y - item.w.y) / 2)
+                        x = w.x - ((w.x - a.x) / 2),
+                        y = w.y + ((a.y - w.y) / 2)
                     )
                     val wd = Offset(
-                        x = item.w.x + ((item.d.x - item.w.x) / 2),
-                        y = item.w.y + ((item.d.y - item.w.y) / 2)
+                        x = w.x + ((d.x - w.x) / 2),
+                        y = w.y + ((d.y - w.y) / 2)
                     )
                     val sa = Offset(
-                        x = item.a.x + ((item.s.x - item.a.x) / 2),
-                        y = item.a.y + ((item.s.y - item.a.y) / 2)
+                        x = a.x + ((s.x - a.x) / 2),
+                        y = a.y + ((s.y - a.y) / 2)
                     )
                     val sd = Offset(
-                        x = item.s.x + ((item.d.x - item.s.x) / 2),
-                        y = item.s.y + ((item.d.y - item.s.y) / 2)
+                        x = s.x + ((d.x - s.x) / 2),
+                        y = s.y + ((d.y - s.y) / 2)
                     )
-                    wasdMap[MASK_W or MASK_A] = KeyMap(position = wa, center = item.center)
-                    wasdMap[MASK_W or MASK_D] = KeyMap(position = wd, center = item.center)
-                    wasdMap[MASK_S or MASK_A] = KeyMap(position = sa, center = item.center)
-                    wasdMap[MASK_S or MASK_D] = KeyMap(position = sd, center = item.center)
+                    wasdMap[MASK_W or MASK_A] = KeyMap(position = wa, center = center)
+                    wasdMap[MASK_W or MASK_D] = KeyMap(position = wd, center = center)
+                    wasdMap[MASK_S or MASK_A] = KeyMap(position = sa, center = center)
+                    wasdMap[MASK_S or MASK_D] = KeyMap(position = sd, center = center)
 
                     alloc(KEYCODE_WASD)
                 }

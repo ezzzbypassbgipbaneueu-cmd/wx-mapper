@@ -3,21 +3,24 @@ package com.wx.mapper.domain
 import android.view.InputEvent
 import android.view.MotionEvent
 import androidx.compose.ui.geometry.Offset
-import androidx.core.animation.doOnCancel
-import androidx.core.animation.doOnEnd
-import androidx.core.animation.doOnStart
 import com.wx.mapper.model.EventInjector
 import com.wx.mapper.model.EventManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
+import java.util.concurrent.ConcurrentHashMap
 
 abstract class EventInjectorImpl(private val eventManager: EventManager = EventManagerImpl()) :
     EventInjector {
-    private val animators = mutableMapOf<Int, ObjectRandomAnimator>()
+    // Gestos (joystick WASD): cada ponteiro tem um job que empurra o dedo do centro até a borda.
+    // Antes isso usava ValueAnimator (preso ao Choreographer da thread principal); agora roda
+    // direto na fila de eventos, sem depender de frame de tela.
+    private val gestureJobs = ConcurrentHashMap<Int, Job>()
 
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
@@ -60,58 +63,48 @@ abstract class EventInjectorImpl(private val eventManager: EventManager = EventM
         injectMotion(action)
     }
 
+    private fun startMove(pointerID: Int, from: Offset, to: Offset) {
+        gestureJobs.remove(pointerID)?.cancel()
+        val job = scope.launch {
+            for (i in 1..GESTURE_STEPS) {
+                delay(GESTURE_STEP_MS)
+                ensureActive()
+                val f = i / GESTURE_STEPS.toFloat()
+                val jitter = if (i < GESTURE_STEPS) (-1..1).random().toFloat() else 0f
+                val x = from.x + (to.x - from.x) * f + jitter
+                val y = from.y + (to.y - from.y) * f - jitter
+                enqueue {
+                    if (eventManager.updatePointer(pointerID, x, y)) {
+                        injectMotion(MotionEvent.ACTION_MOVE)
+                    }
+                }
+            }
+        }
+        gestureJobs[pointerID] = job
+    }
+
     override fun injectGesture(pointerID: Int, o1: Offset, o2: Offset) {
-        animators[pointerID]?.let {
-            it.cancel()
-            animators.remove(pointerID)
-        }
-        val animator = ObjectRandomAnimator()
-        animator.init(o1, o2, duration = 80)
-
-        // `cancelled` é lido pela thread da fila; evita enviar MOVEs de um gesto já cancelado
-        // sem descartar o último frame (isRunning já é false quando o último frame roda).
-        val cancelled = java.util.concurrent.atomic.AtomicBoolean(false)
-        animator.doOnCancel { cancelled.set(true) }
-
-        animator.doOnStart {
-            // DOWN entra na fila ANTES de qualquer MOVE
-            enqueue {
-                if (!injected(pointerID)) {
-                    downNow(pointerID, o1.x, o1.y)
-                }
+        gestureJobs.remove(pointerID)?.cancel()
+        // DOWN entra na fila ANTES de qualquer MOVE
+        enqueue {
+            if (!injected(pointerID)) {
+                downNow(pointerID, o1.x, o1.y)
             }
         }
-        animator.addUpdateListener { animation ->
-            val offset = animation.animatedValue as Offset
-            enqueue {
-                if (cancelled.get()) return@enqueue
-                if (eventManager.updatePointer(pointerID, offset.x, offset.y)) {
-                    injectMotion(MotionEvent.ACTION_MOVE)
-                }
-            }
-        }
-        animator.doOnEnd {
-            if (animators[pointerID] === animator) animators.remove(pointerID)
-        }
-        animators[pointerID] = animator
-        animator.start()
+        startMove(pointerID, o1, o2)
     }
 
     override fun transFormGesture(pointerID: Int, position: Offset) {
+        gestureJobs.remove(pointerID)?.cancel()
         enqueue {
             eventManager.getPointerLocation(pointerID)?.let {
-                withContext(Dispatchers.Main) {
-                    injectGesture(pointerID, it, position)
-                }
+                startMove(pointerID, it, position)
             }
         }
     }
 
     override fun releaseGesture(pointerID: Int) {
-        animators[pointerID]?.let {
-            it.cancel()
-            animators.remove(pointerID)
-        }
+        gestureJobs.remove(pointerID)?.cancel()
         releasePointer(pointerID)
     }
 
@@ -147,8 +140,8 @@ abstract class EventInjectorImpl(private val eventManager: EventManager = EventM
     }
 
     override fun clear() {
-        animators.values.forEach { it.cancel() }
-        animators.clear()
+        gestureJobs.values.forEach { it.cancel() }
+        gestureJobs.clear()
         enqueue {
             injectMotion(MotionEvent.ACTION_CANCEL)
             eventManager.clear()
@@ -159,4 +152,9 @@ abstract class EventInjectorImpl(private val eventManager: EventManager = EventM
         return eventManager.getPointerAction(pointerID, false) != -1
     }
 
+
+    private companion object {
+        const val GESTURE_STEPS = 6
+        const val GESTURE_STEP_MS = 12L
+    }
 }

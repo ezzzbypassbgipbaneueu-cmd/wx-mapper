@@ -17,6 +17,13 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import com.wx.mapper.model.CursorStyle
 import com.wx.mapper.service.TypingState
+import com.wx.mapper.util.CursorImages
+import android.widget.Toast
+import androidx.compose.foundation.border
+import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import java.io.File
 import java.io.FileOutputStream
 import androidx.compose.foundation.clickable
@@ -84,6 +91,8 @@ fun SettingsScreen(
     modifier: Modifier = Modifier,
     appConfig: AppConfig = AppConfig.Default,
     onSave: (AppConfig) -> Unit = {},
+    /** Aplica e SALVA na hora só as mudanças do cursor, sem precisar apertar "Save". */
+    onApplyCursor: ((AppConfig) -> AppConfig) -> Unit = {},
     onNavigateBack: () -> Unit = {},
     onNavigateAbout: () -> Unit = {}
 ) {
@@ -171,16 +180,30 @@ fun SettingsScreen(
                 }
                 Card {
                     val context = LocalContext.current
+                    var images by remember { mutableStateOf(CursorImages.list(context)) }
+
+                    // aplica na tela e já salva no app
+                    fun applyCursor(transform: (AppConfig) -> AppConfig) {
+                        newConfig = transform(newConfig)
+                        onApplyCursor(transform)
+                    }
+
                     val imagePicker = rememberLauncherForActivityResult(
                         ActivityResultContracts.GetContent()
                     ) { uri ->
                         if (uri != null) {
-                            saveCursorImage(context, uri)?.let { path ->
-                                newConfig = newConfig.copy(
-                                    cursorImagePath = path,
-                                    cursorImageVersion = System.currentTimeMillis(),
-                                    cursorStyle = CursorStyle.IMAGE
-                                )
+                            val file = CursorImages.import(context, uri)
+                            if (file != null) {
+                                images = CursorImages.list(context)
+                                applyCursor {
+                                    it.copy(
+                                        cursorImagePath = file.absolutePath,
+                                        cursorImageVersion = System.currentTimeMillis(),
+                                        cursorStyle = CursorStyle.IMAGE
+                                    )
+                                }
+                            } else {
+                                Toast.makeText(context, "Não foi possível ler essa imagem.", Toast.LENGTH_SHORT).show()
                             }
                         }
                     }
@@ -195,39 +218,75 @@ fun SettingsScreen(
                             color = MaterialTheme.colorScheme.primary
                         )
                         Text(
-                            "Use qualquer imagem (PNG com fundo transparente fica melhor) como cursor do mouse.",
+                            "Adicione quantos PNGs quiser (fundo transparente fica melhor). As imagens ficam salvas no app; toque em uma para usar como cursor.",
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            val preview = remember(newConfig.cursorImagePath, newConfig.cursorImageVersion) {
-                                newConfig.cursorImagePath?.let { path ->
-                                    runCatching { BitmapFactory.decodeFile(path)?.asImageBitmap() }.getOrNull()
+                        FilledTonalButton(onClick = { imagePicker.launch("image/*") }) {
+                            Text("Adicionar PNG / imagem")
+                        }
+                        if (images.isEmpty()) {
+                            Text(
+                                "Nenhuma imagem salva ainda.",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        } else {
+                            Row(
+                                modifier = Modifier.horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                images.forEach { file ->
+                                    val thumb = remember(file.path, file.lastModified()) {
+                                        runCatching { BitmapFactory.decodeFile(file.path)?.asImageBitmap() }.getOrNull()
+                                    }
+                                    val selected = newConfig.cursorImagePath == file.absolutePath
+                                    Box(
+                                        modifier = Modifier
+                                            .size(64.dp)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(Color.Gray.copy(alpha = 0.3f))
+                                            .border(
+                                                width = if (selected) 3.dp else 1.dp,
+                                                color = if (selected) MaterialTheme.colorScheme.primary
+                                                else MaterialTheme.colorScheme.outline,
+                                                shape = RoundedCornerShape(8.dp)
+                                            )
+                                            .clickable {
+                                                applyCursor {
+                                                    it.copy(
+                                                        cursorImagePath = file.absolutePath,
+                                                        cursorImageVersion = System.currentTimeMillis(),
+                                                        cursorStyle = CursorStyle.IMAGE
+                                                    )
+                                                }
+                                            },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        if (thumb != null) {
+                                            Image(
+                                                bitmap = thumb,
+                                                contentDescription = "Cursor",
+                                                modifier = Modifier
+                                                    .size(52.dp)
+                                            )
+                                        }
+                                    }
                                 }
                             }
-                            if (preview != null) {
-                                Image(
-                                    bitmap = preview,
-                                    contentDescription = "Cursor",
-                                    modifier = Modifier
-                                        .size(48.dp)
-                                        .padding(end = 8.dp)
-                                )
-                            }
-                            FilledTonalButton(onClick = { imagePicker.launch("image/*") }) {
-                                Text(if (preview != null) "Trocar imagem" else "Escolher imagem")
-                            }
-                            if (newConfig.cursorImagePath != null) {
-                                TextButton(onClick = {
-                                    newConfig = newConfig.copy(
-                                        cursorImagePath = null,
-                                        cursorStyle = if (newConfig.cursorStyle == CursorStyle.IMAGE)
-                                            CursorStyle.ARROW else newConfig.cursorStyle
-                                    )
-                                }) { Text("Remover") }
-                            }
                         }
-                        if (newConfig.cursorImagePath != null) {
+                        val current = newConfig.cursorImagePath
+                        if (current != null) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("Usar a imagem como cursor", modifier = Modifier.weight(1f))
+                                Switch(
+                                    checked = newConfig.cursorStyle == CursorStyle.IMAGE,
+                                    onCheckedChange = { on ->
+                                        applyCursor {
+                                            it.copy(cursorStyle = if (on) CursorStyle.IMAGE else CursorStyle.ARROW)
+                                        }
+                                    })
+                            }
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Column(Modifier.weight(1f)) {
                                     Text("Ponto do clique no centro", style = MaterialTheme.typography.titleMedium)
@@ -239,20 +298,21 @@ fun SettingsScreen(
                                 }
                                 Switch(
                                     checked = newConfig.cursorImageHotspotCenter,
-                                    onCheckedChange = {
-                                        newConfig = newConfig.copy(cursorImageHotspotCenter = it)
+                                    onCheckedChange = { on ->
+                                        applyCursor { it.copy(cursorImageHotspotCenter = on) }
                                     })
                             }
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text("Usar a imagem como cursor", modifier = Modifier.weight(1f))
-                                Switch(
-                                    checked = newConfig.cursorStyle == CursorStyle.IMAGE,
-                                    onCheckedChange = {
-                                        newConfig = newConfig.copy(
-                                            cursorStyle = if (it) CursorStyle.IMAGE else CursorStyle.ARROW
-                                        )
-                                    })
-                            }
+                            TextButton(onClick = {
+                                File(current).let { CursorImages.delete(it) }
+                                images = CursorImages.list(context)
+                                applyCursor {
+                                    it.copy(
+                                        cursorImagePath = null,
+                                        cursorStyle = if (it.cursorStyle == CursorStyle.IMAGE)
+                                            CursorStyle.ARROW else it.cursorStyle
+                                    )
+                                }
+                            }) { Text("Excluir a imagem selecionada") }
                         }
                     }
                 }
@@ -629,20 +689,3 @@ fun KeyConfigTextField(
         }
     }
 }
-
-/** Copia a imagem escolhida para o armazenamento do app (reduzida) e devolve o caminho. */
-private fun saveCursorImage(context: Context, uri: Uri): String? = runCatching {
-    val resolver = context.contentResolver
-    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-    resolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
-    var sample = 1
-    while (bounds.outWidth / sample > 512 || bounds.outHeight / sample > 512) sample *= 2
-    val options = BitmapFactory.Options().apply { inSampleSize = sample }
-    val bitmap = resolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, options) }
-        ?: return@runCatching null
-    val file = File(context.filesDir, "cursor_custom_${System.currentTimeMillis()}.png")
-    FileOutputStream(file).use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
-    context.filesDir.listFiles { f -> f.name.startsWith("cursor_custom_") && f != file }
-        ?.forEach { it.delete() }
-    file.absolutePath
-}.getOrNull()

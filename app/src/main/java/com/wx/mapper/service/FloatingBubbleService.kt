@@ -263,6 +263,7 @@ class FloatingBubbleService : Service() {
         stateManager.get().windowManager.addView(floatingBubbleView, floatingBubbleLP)
         containerView?.postDelayed({
             val sm = stateManager.get()
+            sm.refreshKeyMapping()
             if (!sm.isBubbleExpanded.value && !sm.isTypingMode.value) {
                 containerView?.requestFocus()
                 containerView?.requestPointerCapture()
@@ -578,6 +579,7 @@ class FloatingBubbleService : Service() {
                         onCursorColorChange = { stateManager.get().updateCursorColor(it) },
                         onCursorOpacityChange = { stateManager.get().updateCursorOpacity(it) },
                         cursorHasImage = keysConfig.cursorImagePath != null,
+                        onNextCursorImage = { stateManager.get().cycleCursorImage() },
                         autoTypingMode = keysConfig.autoTypingMode,
                         onAutoTypingChange = { stateManager.get().updateAutoTyping(it) },
                         onTypingModeClick = {

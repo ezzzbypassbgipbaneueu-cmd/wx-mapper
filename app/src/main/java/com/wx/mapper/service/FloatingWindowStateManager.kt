@@ -177,6 +177,11 @@ class FloatingWindowStateManager @Inject constructor(
         }
     }
 
+    /** Reaplica o mapeamento depois que o overlay já foi composto e os tamanhos reais foram medidos. */
+    fun refreshKeyMapping() {
+        if (!_isBubbleExpanded.value) eventHandler.updateKeyMapping(containerItems.value)
+    }
+
     fun addNewItem(itemType: DraggableItemType) {
         val itemID = containerItems.value.sumOf { it.id } + 1
         val offset = Offset(0f,200f)
@@ -323,6 +328,22 @@ class FloatingWindowStateManager @Inject constructor(
             }
         }
         return true
+    }
+
+    /** Passa para a próxima imagem salva na galeria de cursores. */
+    fun cycleCursorImage() {
+        val images = com.wx.mapper.util.CursorImages.list(context)
+        if (images.isEmpty()) return
+        val current = _appConfig.value.cursorImagePath
+        val index = images.indexOfFirst { it.absolutePath == current }
+        val next = images[(index + 1) % images.size]
+        updateCursorSettings {
+            copy(
+                cursorImagePath = next.absolutePath,
+                cursorImageVersion = System.currentTimeMillis(),
+                cursorStyle = CursorStyle.IMAGE
+            )
+        }
     }
 
     fun updateAutoTyping(enabled: Boolean) = updateCursorSettings { copy(autoTypingMode = enabled) }

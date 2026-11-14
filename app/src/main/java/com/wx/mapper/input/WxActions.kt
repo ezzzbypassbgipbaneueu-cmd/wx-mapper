@@ -30,8 +30,11 @@ class WxActions(
         set(value) {
             val old = field
             field = value.sanitized()
-            if (!field.enabled || old.triggerKeyCode != field.triggerKeyCode) {
+            if (!field.enabled || old.triggerKeyCode != field.triggerKeyCode ||
+                old.toggleMode != field.toggleMode
+            ) {
                 held.clear()
+                autoToggledOn = false
                 autoClicker.stop()
             }
         }
@@ -41,6 +44,9 @@ class WxActions(
 
     private val held = HashSet<Int>()
     private var primaryButtonDown = false
+
+    /** Modo alternar: o autoclicker está "ligado" (mesmo que pausado enquanto o botão esquerdo está preso). */
+    private var autoToggledOn = false
 
     fun setMacros(macros: List<Macro>) {
         macrosByKey = macros.filter { it.triggerKeyCode != null }
@@ -61,7 +67,20 @@ class WxActions(
         val transition = if (pressed) held.add(keyCode) else held.remove(keyCode)
 
         if (isAuto) {
-            if (pressed) {
+            if (config.toggleMode) {
+                // ALTERNAR: só a primeira batida do botão conta (repetição e soltar são ignorados).
+                if (pressed && transition) {
+                    if (autoToggledOn) {
+                        autoToggledOn = false
+                        autoClicker.stop()
+                    } else {
+                        autoToggledOn = true
+                        if (!primaryButtonDown) {
+                            autoClicker.start(config) { clickPosition(config) }
+                        }
+                    }
+                }
+            } else if (pressed) {
                 if (transition && !primaryButtonDown) {
                     autoClicker.start(config) { clickPosition(config) }
                 }
@@ -88,7 +107,7 @@ class WxActions(
 
         if (pressed) {
             if (autoClicker.isRunning.value) autoClicker.stop()
-        } else if (held.contains(config.triggerKeyCode)) {
+        } else if (if (config.toggleMode) autoToggledOn else held.contains(config.triggerKeyCode)) {
             autoClicker.start(config) { clickPosition(config) }
         }
     }
@@ -100,6 +119,8 @@ class WxActions(
         onPrimaryButton(primaryNow)
 
         val config = autoClickerConfig
+        // No modo alternar o estado "ligado" não depende do botão estar preso.
+        if (config.toggleMode) return
         val triggerMask = when (config.triggerKeyCode) {
             KEYCODE_LMC -> MotionEvent.BUTTON_PRIMARY
             KEYCODE_RMC -> MotionEvent.BUTTON_SECONDARY
@@ -121,6 +142,7 @@ class WxActions(
     @Synchronized
     fun stopAll() {
         held.clear()
+        autoToggledOn = false
         primaryButtonDown = false
         autoClicker.stop()
         macroPlayer.stop()

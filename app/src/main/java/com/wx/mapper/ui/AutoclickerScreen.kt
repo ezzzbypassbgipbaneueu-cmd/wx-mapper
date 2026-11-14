@@ -100,7 +100,23 @@ fun AutoclickerScreen(
             }
 
             GlassCard {
-                Text("Botão de ativação (segure para clicar)")
+                Text("Modo de ativação")
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(
+                        selected = cfg.toggleMode,
+                        onClick = { update(cfg.copy(toggleMode = true)) },
+                        label = { Text("Alternar") })
+                    FilterChip(
+                        selected = !cfg.toggleMode,
+                        onClick = { update(cfg.copy(toggleMode = false)) },
+                        label = { Text("Segurar") })
+                }
+                Text(
+                    if (cfg.toggleMode) "Clique no botão para LIGAR o autoclicker e clique de novo para PARAR."
+                    else "O autoclicker clica só enquanto o botão estiver pressionado.",
+                    style = MaterialTheme.typography.bodySmall
+                )
+                Text("Botão de ativação")
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     listOf(KEYCODE_LMC to "Esquerdo", KEYCODE_RMC to "Direito", KEYCODE_MMC to "Meio").forEach { (code, label) ->
                         FilterChip(

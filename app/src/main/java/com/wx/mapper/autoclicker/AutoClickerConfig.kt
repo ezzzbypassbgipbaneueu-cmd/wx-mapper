@@ -22,6 +22,11 @@ data class AutoClickerConfig(
     val positionMode: ClickPositionMode = ClickPositionMode.FOLLOW_POINTER,
     val fixedX: Float = 0f,
     val fixedY: Float = 0f,
+    /**
+     * true  = ALTERNAR: um clique no botão liga o autoclicker, outro clique desliga.
+     * false = SEGURAR: só clica enquanto o botão estiver pressionado.
+     */
+    val toggleMode: Boolean = true,
 ) {
     fun sanitized(): AutoClickerConfig = copy(cps = cps.coerceIn(MIN_CPS, MAX_CPS))
 
