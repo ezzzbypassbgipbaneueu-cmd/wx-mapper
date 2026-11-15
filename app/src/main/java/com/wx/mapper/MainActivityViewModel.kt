@@ -19,13 +19,19 @@ import androidx.lifecycle.viewModelScope
 import com.wx.mapper.data.local.DataStoreManager
 import com.wx.mapper.model.AppConfig
 import com.wx.mapper.model.DraggableItem
+import com.wx.mapper.model.GameProfile
+import com.wx.mapper.model.GameSummary
 import com.wx.mapper.service.FloatingBubbleService
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import rikka.shizuku.Shizuku
@@ -48,6 +54,10 @@ class MainActivityViewModel @Inject constructor(
 
     private val _appConfig = MutableStateFlow(AppConfig.Default)
     val appConfig = _appConfig.asStateFlow()
+
+    /** Resumo (botões, macros, CPS) de cada jogo, para a lista da tela inicial. */
+    val summaries = dataStoreManager.observeSummaries()
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap<String, GameSummary>())
 
 
     private val _connectedDevices = MutableStateFlow<Map<Int, String>>(hashMapOf())
@@ -136,6 +146,7 @@ class MainActivityViewModel @Inject constructor(
                 } else {
                     if (appConfig.value.deleteDataOnRemove) {
                         dataStoreManager.remove(DataStoreManager.getButtonsConfigKey(packageName))
+                        dataStoreManager.removeProfile(packageName)
                     }
                     false
                 }
@@ -150,6 +161,60 @@ class MainActivityViewModel @Inject constructor(
         _addedPackages.value = _addedPackages.value.plus(packages)
         viewModelScope.launch {
             dataStoreManager.saveList(DataStoreManager.ADDED_PACKAGES, _addedPackages.value)
+            dataStoreManager.ensureProfile(packages)
+        }
+    }
+
+    fun removePackage(packageName: String) {
+        val index = _addedPackages.value.indexOf(packageName)
+        if (index >= 0) removePackages(listOf(index))
+    }
+
+    // ---- Perfis por jogo -------------------------------------------------------------------
+
+    /** Perfil salvo do jogo (ou um perfil limpo se ainda não existe). */
+    fun profileFlow(packageName: String): Flow<GameProfile> =
+        dataStoreManager.getProfile(packageName).map { it ?: GameProfile() }
+
+    fun ensureProfile(packageName: String) {
+        viewModelScope.launch { dataStoreManager.ensureProfile(packageName) }
+    }
+
+    fun saveProfile(packageName: String, profile: GameProfile) {
+        viewModelScope.launch { dataStoreManager.saveProfile(packageName, profile) }
+    }
+
+    /** Copia partes do perfil de [from] para [to] (keymap, macros, autoclicker, mouse). */
+    fun copyProfile(
+        from: String,
+        to: String,
+        copyLayout: Boolean,
+        copyMacros: Boolean,
+        copyAutoClicker: Boolean,
+        copyMouse: Boolean,
+    ) {
+        viewModelScope.launch {
+            val source = dataStoreManager.ensureProfile(from)
+            var target = dataStoreManager.ensureProfile(to)
+            if (copyMacros) target = target.copy(macros = source.macros)
+            if (copyAutoClicker) target = target.copy(autoClicker = source.autoClicker)
+            if (copyMouse) target = target.copy(
+                pointerSensitivity = source.pointerSensitivity,
+                overlayOpacity = source.overlayOpacity
+            )
+            dataStoreManager.saveProfile(to, target)
+            if (copyLayout) {
+                val items = dataStoreManager.getButtons(DataStoreManager.getButtonsConfigKey(from)).first()
+                dataStoreManager.save(DataStoreManager.getButtonsConfigKey(to), items)
+            }
+        }
+    }
+
+    /** Apaga o keymap e volta o perfil do jogo ao padrão. */
+    fun resetProfile(packageName: String) {
+        viewModelScope.launch {
+            dataStoreManager.save(DataStoreManager.getButtonsConfigKey(packageName), emptyList<DraggableItem>())
+            dataStoreManager.saveProfile(packageName, GameProfile())
         }
     }
 
@@ -272,9 +337,9 @@ class MainActivityViewModel @Inject constructor(
                     Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
             }
             context.startActivity(packageIntent)
-            if (!isServiceRunning) {
-                launchFloatingBubbleService(packageName)
-            }
+            // Sempre avisa o overlay: se ele já está rodando (de outro jogo), troca para o
+            // keymap/perfil deste jogo em vez de ficar com o do jogo anterior.
+            launchFloatingBubbleService(packageName)
         }catch (e:Exception){
             //failed to launch package
             Log.e(TAG,"failed to launch package",e)

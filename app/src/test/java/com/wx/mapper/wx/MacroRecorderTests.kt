@@ -87,3 +87,53 @@ class BackupTests {
         assertTrue(failed)
     }
 }
+
+class GameProfileTests {
+    private val macro = com.wx.mapper.macros.Macro(
+        id = 1, name = "m", triggerKeyCode = android.view.KeyEvent.KEYCODE_F7,
+        actions = listOf(MacroAction.Tap(1f, 2f, 5))
+    )
+
+    @Test
+    fun backup_keeps_a_separate_profile_per_game() {
+        val a = com.wx.mapper.model.GameProfile(
+            autoClicker = com.wx.mapper.autoclicker.AutoClickerConfig(cps = 100f),
+            macros = listOf(macro),
+            pointerSensitivity = 0.8f
+        )
+        val b = com.wx.mapper.model.GameProfile()
+        val text = com.wx.mapper.data.local.WxBackup(
+            config = com.wx.mapper.model.AppConfig.Default,
+            profiles = mapOf("com.game.a" to a, "com.game.b" to b)
+        ).toJsonText()
+        val back = com.wx.mapper.data.local.parseBackup(text)
+        assertEquals(a, back.profiles["com.game.a"])
+        assertEquals(b, back.profiles["com.game.b"])
+        assertFalse(back.profiles["com.game.a"] == back.profiles["com.game.b"])
+    }
+
+    @Test
+    fun old_backup_without_profiles_still_loads() {
+        val text = com.wx.mapper.data.local.BackupJson.encodeToString(
+            com.wx.mapper.data.local.WxBackup(config = com.wx.mapper.model.AppConfig.Default, version = 1)
+        ).replace("\"profiles\": {},", "").replace("\"profiles\": {}", "")
+        val back = com.wx.mapper.data.local.parseBackup(text)
+        assertTrue(back.profiles.isEmpty())
+    }
+
+    @Test
+    fun profile_sanitizes_autoclicker_limits_on_import() {
+        val wild = com.wx.mapper.model.GameProfile(
+            autoClicker = com.wx.mapper.autoclicker.AutoClickerConfig(cps = 9999f)
+        )
+        val text = com.wx.mapper.data.local.WxBackup(
+            config = com.wx.mapper.model.AppConfig.Default,
+            profiles = mapOf("x" to wild)
+        ).toJsonText()
+        val back = com.wx.mapper.data.local.parseBackup(text)
+        assertEquals(
+            com.wx.mapper.autoclicker.AutoClickerConfig.MAX_CPS,
+            back.profiles.getValue("x").autoClicker.cps
+        )
+    }
+}

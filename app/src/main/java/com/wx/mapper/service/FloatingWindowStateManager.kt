@@ -16,6 +16,7 @@ import com.wx.mapper.model.AppConfig
 import com.wx.mapper.model.CursorStyle
 import com.wx.mapper.model.DraggableItem
 import com.wx.mapper.model.DraggableItemType
+import com.wx.mapper.model.GameProfile
 import com.wx.mapper.domain.EventHandler
 import com.wx.mapper.input.WxRuntime
 import com.wx.mapper.macros.Macro
@@ -26,6 +27,8 @@ import com.wx.mapper.service.TypingState
 import com.wx.mapper.data.external.ShizukuSystemServerAPi
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -33,7 +36,10 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -79,13 +85,51 @@ class FloatingWindowStateManager @Inject constructor(
         if (!_isBubbleExpanded.value) eventHandler.updateKeyMapping(containerItems.value)
     }
 
+    private var lastScreenW = 0
+    private var lastScreenH = 0
+
     val pointerSensitivity = MutableStateFlow(0.5f)
     val overlayOpacity = MutableStateFlow(0.5f)
 
     private var buttonConfigKey :Preferences.Key<String>? = null
 
-    private val _appConfig =MutableStateFlow(AppConfig.Default)
+    // Configuração GLOBAL (teclas, cursor, tema...) e perfil do jogo ativo (autoclicker, macros...).
+    // _appConfig é a junção dos dois: é ela que o resto do app lê.
+    private val _globalConfig = MutableStateFlow(AppConfig.Default)
+    private val _profile = MutableStateFlow(GameProfile())
+    private val _activePackage = MutableStateFlow<String?>(null)
+    /** Pacote do jogo cujo perfil/keymap está carregado agora (null = nenhum ainda). */
+    val activePackage = _activePackage.asStateFlow()
+    private var switchJob: Job? = null
+
+    private val _appConfig = MutableStateFlow(AppConfig.Default)
     val keysConfig = _appConfig.asStateFlow()
+
+    private fun buildEffectiveConfig(): AppConfig {
+        val global = _globalConfig.value
+        if (_activePackage.value == null) return global
+        val p = _profile.value
+        return global.copy(autoClicker = p.autoClicker.sanitized(), macros = p.macros)
+    }
+
+    /** Recalcula a config efetiva; só reaplica no EventHandler se algo além do cursor mudou. */
+    private fun applyEffectiveConfig(force: Boolean = false) {
+        val previous = _appConfig.value
+        val next = buildEffectiveConfig()
+        _appConfig.value = next
+        val previousWithoutCursor = previous.copy(
+            cursorStyle = next.cursorStyle,
+            cursorSizeDp = next.cursorSizeDp,
+            cursorColor = next.cursorColor,
+            cursorOpacity = next.cursorOpacity,
+            cursorImagePath = next.cursorImagePath,
+            cursorImageVersion = next.cursorImageVersion,
+            cursorImageHotspotCenter = next.cursorImageHotspotCenter
+        )
+        if (force || previousWithoutCursor != next) {
+            eventHandler.appConfig = next
+        }
+    }
     /** true enquanto uma macro está sendo gravada (mostra o aviso GRAVANDO no overlay). */
     val macroRecording get() = eventHandler.recorder.isRecording
 
@@ -120,19 +164,17 @@ class FloatingWindowStateManager @Inject constructor(
     val isShootingMode = eventHandler.shootingModeFlow
 
     init {
+        lastScreenW = screenWidthPx
+        lastScreenH = screenHeightPx
         eventHandler.pointerPositionProvider = { pointerOffset.value }
         WxRuntime.attach(eventHandler.wx)
         scope.launch {
-            isBubbleExpanded.drop(1).collect{isExpanded->
-                if (isExpanded)
-                    return@collect
-                buttonConfigKey?.let {
-                    dataStoreManager.save(DataStoreManager.OVERLAY_OPACITY,overlayOpacity.value)
-                    dataStoreManager.save(DataStoreManager.POINTER_SENSITIVITY,pointerSensitivity.value)
-                    dataStoreManager.save(it,containerItems.value)
-                }
-                _appConfig.value = dataStoreManager.getKeyConfig(DataStoreManager.KEYS_CONFIG).first()
-                eventHandler.appConfig = _appConfig.value
+            isBubbleExpanded.drop(1).collect { isExpanded ->
+                if (isExpanded) return@collect
+                // Fechou o editor: salva o keymap e as opções DESTE jogo.
+                persistActiveGame()
+                _globalConfig.value = dataStoreManager.getKeyConfig(DataStoreManager.KEYS_CONFIG).first()
+                applyEffectiveConfig(force = true)
             }
         }
         scope.launch {
@@ -141,44 +183,112 @@ class FloatingWindowStateManager @Inject constructor(
             }
         }
         scope.launch {
-            // Mudanças feitas nas telas (autoclicker/macros) valem na hora, sem reiniciar o overlay.
+            // Mudanças globais feitas nas telas (cursor, teclas...) valem na hora.
             dataStoreManager.getKeyConfig(DataStoreManager.KEYS_CONFIG).drop(1).collect {
-                val previous = _appConfig.value
-                _appConfig.value = it
-                // Cursor-only changes do not need to rebuild macro/autoclicker configuration.
-                val previousWithoutCursor = previous.copy(
-                    cursorStyle = it.cursorStyle,
-                    cursorSizeDp = it.cursorSizeDp,
-                    cursorColor = it.cursorColor,
-                    cursorOpacity = it.cursorOpacity,
-                    cursorImagePath = it.cursorImagePath,
-                    cursorImageVersion = it.cursorImageVersion,
-                    cursorImageHotspotCenter = it.cursorImageHotspotCenter
-                )
-                if (previousWithoutCursor != it) {
-                    eventHandler.appConfig = it
-                }
+                _globalConfig.value = it
+                applyEffectiveConfig()
             }
         }
         scope.launch {
-            _appConfig.value = dataStoreManager.getKeyConfig(DataStoreManager.KEYS_CONFIG).first()
-            eventHandler.setCancelableTouchMode(_appConfig.value.cancellableTouchMode)
-            eventHandler.setNormalBtnTouchMode(_appConfig.value.normalBtnTouchMode)
-            eventHandler.appConfig = _appConfig.value
+            _globalConfig.value = dataStoreManager.getKeyConfig(DataStoreManager.KEYS_CONFIG).first()
+            eventHandler.setCancelableTouchMode(_globalConfig.value.cancellableTouchMode)
+            eventHandler.setNormalBtnTouchMode(_globalConfig.value.normalBtnTouchMode)
+            applyEffectiveConfig(force = true)
         }
-
+        observeActiveGame()
+        observeForegroundGame()
     }
 
-    fun loadButtonsConfig(packageName:String){
-        buttonConfigKey= DataStoreManager.getButtonsConfigKey(packageName)
+    /** Acompanha o perfil e o keymap salvos do jogo ativo (editados pelas telas do app). */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private fun observeActiveGame() {
         scope.launch {
-            _containerItems.value=dataStoreManager.getButtons(buttonConfigKey!!).first()
-            eventHandler.updateKeyMapping(containerItems.value)
-            dataStoreManager.getFloat(DataStoreManager.OVERLAY_OPACITY).first()?.let {
-                overlayOpacity.value = it
+            _activePackage
+                .flatMapLatest { pkg ->
+                    if (pkg == null) emptyFlow<GameProfile?>() else dataStoreManager.getProfile(pkg)
+                }
+                .collect { saved ->
+                    if (saved == null || saved == _profile.value) return@collect
+                    _profile.value = saved
+                    if (!_isBubbleExpanded.value) {
+                        pointerSensitivity.value = saved.pointerSensitivity
+                        overlayOpacity.value = saved.overlayOpacity
+                    }
+                    applyEffectiveConfig()
+                }
+        }
+        scope.launch {
+            _activePackage
+                .flatMapLatest { pkg ->
+                    if (pkg == null) emptyFlow<List<DraggableItem>>()
+                    else dataStoreManager.getButtons(DataStoreManager.getButtonsConfigKey(pkg)).distinctUntilChanged()
+                }
+                .collect { items ->
+                    // Keymap alterado por fora (ex.: copiado de outro jogo). Não mexe durante a edição.
+                    if (!_isBubbleExpanded.value && items != _containerItems.value) {
+                        _containerItems.value = items
+                        eventHandler.updateKeyMapping(items)
+                    }
+                }
+        }
+    }
+
+    /** Se você abrir outro jogo cadastrado (por qualquer caminho), troca para o perfil dele. */
+    private fun observeForegroundGame() {
+        scope.launch {
+            TypingState.foregroundPackage.collect { pkg ->
+                if (pkg == null || pkg == _activePackage.value || _isBubbleExpanded.value) return@collect
+                val games = dataStoreManager.getList(DataStoreManager.ADDED_PACKAGES).first()
+                if (pkg in games) switchGame(pkg, announce = true)
             }
-            dataStoreManager.getFloat(DataStoreManager.POINTER_SENSITIVITY).first()?.let {
-                pointerSensitivity.value = it
+        }
+    }
+
+    /** Salva o keymap e as opções do jogo ativo no armazenamento. */
+    private suspend fun persistActiveGame() {
+        val pkg = _activePackage.value ?: return
+        dataStoreManager.save(DataStoreManager.getButtonsConfigKey(pkg), containerItems.value)
+        val updated = _profile.value.copy(
+            pointerSensitivity = pointerSensitivity.value,
+            overlayOpacity = overlayOpacity.value
+        )
+        _profile.value = updated
+        dataStoreManager.saveProfile(pkg, updated)
+    }
+
+    fun labelFor(packageName: String): String = gameLabel(packageName)
+
+    private fun gameLabel(packageName: String): String = try {
+        val info = context.packageManager.getApplicationInfo(packageName, 0)
+        context.packageManager.getApplicationLabel(info).toString()
+    } catch (e: Exception) {
+        packageName
+    }
+
+    /** Carrega o keymap + perfil do jogo. Chamado ao abrir o jogo pelo app ou ao detectar a troca. */
+    fun loadButtonsConfig(packageName: String) = switchGame(packageName, announce = false)
+
+    fun switchGame(packageName: String, announce: Boolean = false) {
+        if (_activePackage.value == packageName) return
+        switchJob?.cancel()
+        switchJob = scope.launch {
+            // Primeiro salva o jogo que estava ativo, para nunca perder o keymap dele.
+            persistActiveGame()
+            eventHandler.clear()
+            val profile = dataStoreManager.ensureProfile(packageName)
+            val key = DataStoreManager.getButtonsConfigKey(packageName)
+            val items = dataStoreManager.getButtons(key).first()
+            // Daqui até o fim não há pausa: a troca acontece inteira, sem estado pela metade.
+            buttonConfigKey = key
+            _profile.value = profile
+            _containerItems.value = items
+            pointerSensitivity.value = profile.pointerSensitivity
+            overlayOpacity.value = profile.overlayOpacity
+            _activePackage.value = packageName
+            applyEffectiveConfig(force = true)
+            eventHandler.updateKeyMapping(items)
+            if (announce) {
+                Toast.makeText(context, "Perfil: ${gameLabel(packageName)}", Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -241,6 +351,31 @@ class FloatingWindowStateManager @Inject constructor(
         _containerItems.value = containerItems.value.plus(item)
     }
 
+    /**
+     * Atalho: adiciona W, A, S e D como 4 teclas comuns, já ligadas, em cruz. Cada uma vira um
+     * ponto da tela; é só arrastar cada botão para o lugar certo no jogo.
+     */
+    fun addWasdKeys() {
+        var nextId = (containerItems.value.maxOfOrNull { it.id } ?: 0) + 1
+        val base = Offset(200f, 400f)
+        val step = 130f
+        val layout = listOf(
+            KeyEvent.KEYCODE_W to Offset(base.x, base.y - step),
+            KeyEvent.KEYCODE_A to Offset(base.x - step, base.y),
+            KeyEvent.KEYCODE_S to Offset(base.x, base.y),
+            KeyEvent.KEYCODE_D to Offset(base.x + step, base.y),
+        )
+        val used = containerItems.value.mapNotNull { (it as? DraggableItem.VariableKey)?.keyCode }.toSet()
+        val added = layout.filter { it.first !in used }.map { (code, pos) ->
+            DraggableItem.VariableKey(nextId++, position = pos, keyCode = code, size = 0)
+        }
+        if (added.isEmpty()) {
+            Toast.makeText(context, "W, A, S e D já estão no keymap.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        _containerItems.value = containerItems.value + added
+    }
+
     fun removeItem(id: Int) {
         _containerItems.value = _containerItems.value.filterNot { it.id == id }
     }
@@ -287,22 +422,28 @@ class FloatingWindowStateManager @Inject constructor(
             Toast.makeText(context, "Nada gravado.", Toast.LENGTH_SHORT).show()
             return
         }
+        val pkg = _activePackage.value
+        if (pkg == null) {
+            Toast.makeText(context, "Abra o jogo pelo WX MAPPER para salvar a macro no perfil dele.", Toast.LENGTH_LONG).show()
+            return
+        }
         val current = _appConfig.value
-        val id = (current.macros.maxOfOrNull { it.id } ?: 0) + 1
+        val profile = _profile.value
+        val id = (profile.macros.maxOfOrNull { it.id } ?: 0) + 1
         val used = buildSet {
-            current.macros.forEach { m -> m.triggerKeyCode?.let { add(it) } }
+            profile.macros.forEach { m -> m.triggerKeyCode?.let { add(it) } }
             add(current.macroRecordKeyCode)
             add(current.typingModeKeyCode)
             add(current.recordingModeKeyCode)
             add(current.shootingModeKeyCode)
         }
         val trigger = MacroTriggers.nextFree(used)
-        val updated = current.copy(
-            macros = current.macros + Macro(id = id, name = "Gravação $id", triggerKeyCode = trigger, actions = recorded)
+        val updated = profile.copy(
+            macros = profile.macros + Macro(id = id, name = "Gravação $id", triggerKeyCode = trigger, actions = recorded)
         )
-        _appConfig.value = updated
-        eventHandler.appConfig = updated
-        scope.launch { dataStoreManager.save(DataStoreManager.KEYS_CONFIG, updated) }
+        _profile.value = updated
+        applyEffectiveConfig(force = true)
+        scope.launch { dataStoreManager.saveProfile(pkg, updated) }
         val how = trigger?.let { "Aperte ${it.keyCodeToString()} para rodar (e de novo para parar)." }
             ?: "Defina uma tecla na tela de Macros."
         Toast.makeText(context, "Macro salva ($taps toques). $how", Toast.LENGTH_LONG).show()
@@ -410,8 +551,10 @@ class FloatingWindowStateManager @Inject constructor(
         updateCursorSettings { copy(cursorOpacity = opacity.coerceIn(0.1f, 1f)) }
 
     private fun updateCursorSettings(transform: AppConfig.() -> AppConfig) {
-        val updated = _appConfig.value.transform()
-        _appConfig.value = updated
+        // Só mexe na parte GLOBAL: o autoclicker/macros do jogo ativo não vão parar aqui.
+        val updated = _globalConfig.value.transform()
+        _globalConfig.value = updated
+        applyEffectiveConfig()
         scope.launch {
             dataStoreManager.save(DataStoreManager.KEYS_CONFIG, updated)
         }

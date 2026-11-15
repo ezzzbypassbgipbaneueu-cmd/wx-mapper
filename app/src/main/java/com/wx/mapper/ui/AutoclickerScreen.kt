@@ -23,15 +23,12 @@ import com.wx.mapper.model.AppConfig
 import com.wx.mapper.ui.theme.GlassCard
 import com.wx.mapper.ui.theme.WxBackground
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.serialization.Serializable
 import kotlin.math.roundToInt
-
-@Serializable
-object AutoclickerScreen
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AutoclickerScreen(
+    gameName: String = "",
     appConfig: AppConfig,
     onNavigateBack: () -> Unit,
     onSave: (AppConfig) -> Unit,
@@ -51,7 +48,7 @@ fun AutoclickerScreen(
         modifier = Modifier.background(WxBackground),
         topBar = {
             TopAppBar(
-                title = { Text("Autoclicker") },
+                title = { Text(if (gameName.isBlank()) "Autoclicker" else "Autoclicker · $gameName") },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Voltar")

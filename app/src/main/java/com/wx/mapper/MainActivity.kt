@@ -33,13 +33,21 @@ import androidx.lifecycle.viewModelScope
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.toRoute
+import android.graphics.drawable.Drawable
+import androidx.compose.runtime.produceState
+import com.wx.mapper.model.GameProfile
 import com.wx.mapper.MainActivityViewModel.UiState
 import com.wx.mapper.model.ThemePreference
 import com.wx.mapper.service.FloatingBubbleService
 import com.wx.mapper.ui.AboutScreen
+import com.wx.mapper.ui.AutoclickerRoute
 import com.wx.mapper.ui.AutoclickerScreen
+import com.wx.mapper.ui.MacrosRoute
 import com.wx.mapper.ui.MacrosScreen
 import com.wx.mapper.ui.MainScreen
+import com.wx.mapper.ui.ProfileRoute
+import com.wx.mapper.ui.ProfileScreen
 import com.wx.mapper.ui.SettingsScreen
 import com.wx.mapper.ui.theme.WxTheme
 import dagger.hilt.android.AndroidEntryPoint
@@ -110,11 +118,15 @@ class MainActivity : ComponentActivity() {
                             viewModel = viewModel,
                             snackbarHostState = snackbarHostState,
                             appName = getString(R.string.app_name),
+                            isShizukuReady = uiState is UiState.ShizukuRunning,
+                            isOverlayRunning = isServiceRunning,
                             onNavigateToSettings = {
                                 navController.navigate(route = SettingsScreen)
                             },
-                            onNavigateToAutoclicker = { navController.navigate(route = AutoclickerScreen) },
-                            onNavigateToMacros = { navController.navigate(route = MacrosScreen) }
+                            onOpenProfile = { pkg ->
+                                viewModel.ensureProfile(pkg)
+                                navController.navigate(route = ProfileRoute(pkg))
+                            }
                         ) { packageName ->
                             if (checkUiState(
                                     uiState,
@@ -123,9 +135,44 @@ class MainActivity : ComponentActivity() {
                                 )
                             ) {
                                 viewModel.launchPackage(packageName,packageManager,isServiceRunning)
-//                                launchService()
                             }
                         }
+                    }
+                    composable<ProfileRoute> { entry ->
+                        val pkg = entry.toRoute<ProfileRoute>().packageName
+                        val profile by remember(pkg) { viewModel.profileFlow(pkg) }
+                            .collectAsStateWithLifecycle(initialValue = GameProfile())
+                        val summaries by viewModel.summaries.collectAsStateWithLifecycle()
+                        val games by viewModel.addedPackages.collectAsStateWithLifecycle()
+                        val icon by produceState<Drawable?>(initialValue = null, pkg) {
+                            value = viewModel.getPackageIcon(pkg)
+                        }
+                        ProfileScreen(
+                            gameName = viewModel.getPackageLabel(pkg),
+                            packageName = pkg,
+                            icon = icon,
+                            profile = profile,
+                            summary = summaries[pkg],
+                            otherGames = games.filter { it != pkg }.map { it to viewModel.getPackageLabel(it) },
+                            onNavigateBack = navController::popBackStack,
+                            onPlay = {
+                                if (checkUiState(uiState, viewModel.viewModelScope, snackbarHostState)) {
+                                    viewModel.launchPackage(pkg, packageManager, isServiceRunning)
+                                }
+                            },
+                            onOpenAutoclicker = { navController.navigate(route = AutoclickerRoute(pkg)) },
+                            onOpenMacros = { navController.navigate(route = MacrosRoute(pkg)) },
+                            onSaveProfile = { viewModel.saveProfile(pkg, it) },
+                            onCopyFrom = { from, layout, macros, auto, mouse ->
+                                viewModel.copyProfile(from, pkg, layout, macros, auto, mouse)
+                                Toast.makeText(
+                                    this@MainActivity,
+                                    "Copiado de ${viewModel.getPackageLabel(from)}.",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            },
+                            onReset = { viewModel.resetProfile(pkg) }
+                        )
                     }
                     composable<SettingsScreen>(
                         popEnterTransition = { EnterTransition.None }) {
@@ -166,18 +213,26 @@ class MainActivity : ComponentActivity() {
                                 navController.navigate(route = MainScreen)
                             })
                     }
-                    composable<AutoclickerScreen> {
+                    composable<AutoclickerRoute> { entry ->
+                        val pkg = entry.toRoute<AutoclickerRoute>().packageName
+                        val profile by remember(pkg) { viewModel.profileFlow(pkg) }
+                            .collectAsStateWithLifecycle(initialValue = GameProfile())
                         AutoclickerScreen(
-                            appConfig = appConfig,
+                            gameName = viewModel.getPackageLabel(pkg),
+                            appConfig = appConfig.copy(autoClicker = profile.autoClicker, macros = profile.macros),
                             onNavigateBack = navController::popBackStack,
-                            onSave = viewModel::saveKeyConfig
+                            onSave = { cfg -> viewModel.saveProfile(pkg, profile.copy(autoClicker = cfg.autoClicker)) }
                         )
                     }
-                    composable<MacrosScreen> {
+                    composable<MacrosRoute> { entry ->
+                        val pkg = entry.toRoute<MacrosRoute>().packageName
+                        val profile by remember(pkg) { viewModel.profileFlow(pkg) }
+                            .collectAsStateWithLifecycle(initialValue = GameProfile())
                         MacrosScreen(
-                            appConfig = appConfig,
+                            gameName = viewModel.getPackageLabel(pkg),
+                            appConfig = appConfig.copy(autoClicker = profile.autoClicker, macros = profile.macros),
                             onNavigateBack = navController::popBackStack,
-                            onSave = viewModel::saveKeyConfig
+                            onSave = { cfg -> viewModel.saveProfile(pkg, profile.copy(macros = cfg.macros)) }
                         )
                     }
                     composable<AboutScreen> {

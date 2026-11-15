@@ -9,6 +9,8 @@ import androidx.datastore.preferences.preferencesDataStore
 import com.wx.mapper.model.AppConfig
 import com.wx.mapper.model.CursorStyle
 import com.wx.mapper.model.DraggableItem
+import com.wx.mapper.model.GameProfile
+import com.wx.mapper.model.GameSummary
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -22,6 +24,18 @@ class DataStoreManager @Inject constructor(private val context: Context) {
     companion object {
         fun getButtonsConfigKey(packageName: String): Preferences.Key<String> =
             stringPreferencesKey("buttons_config_$packageName")
+
+        const val LAYOUT_PREFIX = "buttons_config_"
+        const val PROFILE_PREFIX = "game_profile_"
+
+        fun getProfileKey(packageName: String): Preferences.Key<String> =
+            stringPreferencesKey("$PROFILE_PREFIX$packageName")
+
+        private val profileJson = Json {
+            ignoreUnknownKeys = true
+            encodeDefaults = true
+            coerceInputValues = true
+        }
 
         val ADDED_PACKAGES = stringPreferencesKey("added_packages")
         val POINTER_SENSITIVITY = floatPreferencesKey("pointer_sensitivity")
@@ -50,6 +64,71 @@ class DataStoreManager @Inject constructor(private val context: Context) {
         return context.datastore.data.map { pref ->
             val json = pref[key] ?: return@map emptyList()
             Json.decodeFromString(json)
+        }
+    }
+
+    // ---- Perfis por jogo -------------------------------------------------------------------
+
+    fun getProfile(packageName: String): Flow<GameProfile?> {
+        val key = getProfileKey(packageName)
+        return context.datastore.data.map { pref ->
+            pref[key]?.let { runCatching { profileJson.decodeFromString<GameProfile>(it) }.getOrNull() }
+        }
+    }
+
+    suspend fun saveProfile(packageName: String, profile: GameProfile) {
+        val json = profileJson.encodeToString(profile.copy(autoClicker = profile.autoClicker.sanitized()))
+        context.datastore.edit { pref -> pref[getProfileKey(packageName)] = json }
+    }
+
+    suspend fun removeProfile(packageName: String) {
+        context.datastore.edit { pref -> pref.remove(getProfileKey(packageName)) }
+    }
+
+    /**
+     * Garante que o jogo tem um perfil. Quem já usava o app (jogo com keymap salvo mas sem perfil)
+     * herda o autoclicker/macros/sensibilidade que eram globais; jogo novo começa limpo.
+     */
+    suspend fun ensureProfile(packageName: String): GameProfile {
+        val prefs = context.datastore.data.first()
+        prefs[getProfileKey(packageName)]?.let { text ->
+            runCatching { profileJson.decodeFromString<GameProfile>(text) }.getOrNull()?.let { return it }
+        }
+        val hasLayout = prefs[getButtonsConfigKey(packageName)] != null
+        val global = prefs[KEYS_CONFIG]?.let { runCatching { Json.decodeFromString<AppConfig>(it) }.getOrNull() }
+            ?: AppConfig.Default
+        val profile = if (hasLayout) {
+            GameProfile(
+                autoClicker = global.autoClicker.sanitized(),
+                macros = global.macros,
+                pointerSensitivity = prefs[POINTER_SENSITIVITY] ?: GameProfile.DEFAULT_SENSITIVITY,
+                overlayOpacity = prefs[OVERLAY_OPACITY] ?: GameProfile.DEFAULT_OPACITY,
+            )
+        } else GameProfile()
+        saveProfile(packageName, profile)
+        return profile
+    }
+
+    /** Resumo de cada jogo (botões, macros, CPS) para a lista da tela inicial. */
+    fun observeSummaries(): Flow<Map<String, GameSummary>> {
+        return context.datastore.data.map { prefs ->
+            val names = prefs.asMap().keys.map { it.name }
+            val packages = names.filter { it.startsWith(LAYOUT_PREFIX) }.map { it.removePrefix(LAYOUT_PREFIX) } +
+                    names.filter { it.startsWith(PROFILE_PREFIX) }.map { it.removePrefix(PROFILE_PREFIX) }
+            packages.distinct().associateWith { pkg ->
+                val buttons = prefs[getButtonsConfigKey(pkg)]?.let {
+                    runCatching { Json.decodeFromString<List<DraggableItem>>(it).size }.getOrDefault(0)
+                } ?: 0
+                val profile = prefs[getProfileKey(pkg)]?.let {
+                    runCatching { profileJson.decodeFromString<GameProfile>(it) }.getOrNull()
+                }
+                GameSummary(
+                    buttons = buttons,
+                    macros = profile?.macros?.size ?: 0,
+                    cps = profile?.autoClicker?.cps ?: 0f,
+                    autoClickerEnabled = profile?.autoClicker?.enabled ?: false,
+                )
+            }
         }
     }
 
@@ -99,11 +178,20 @@ class DataStoreManager @Inject constructor(private val context: Context) {
                 }
             }
         }
+        val profiles = buildMap<String, GameProfile> {
+            prefs.asMap().forEach { (key, value) ->
+                if (key.name.startsWith(PROFILE_PREFIX) && value is String) {
+                    runCatching { profileJson.decodeFromString<GameProfile>(value) }.getOrNull()
+                        ?.let { put(key.name.removePrefix(PROFILE_PREFIX), it) }
+                }
+            }
+        }
         val packages = prefs[ADDED_PACKAGES]?.let { Json.decodeFromString<List<String>>(it) } ?: emptyList()
         return WxBackup(
             config = portable,
             addedPackages = packages,
             layouts = layouts,
+            profiles = profiles,
             pointerSensitivity = prefs[POINTER_SENSITIVITY],
             overlayOpacity = prefs[OVERLAY_OPACITY],
         ).toJsonText()
@@ -117,8 +205,13 @@ class DataStoreManager @Inject constructor(private val context: Context) {
             backup.layouts.forEach { (pkg, items) ->
                 pref[getButtonsConfigKey(pkg)] = Json.encodeToString(items)
             }
+            backup.profiles.forEach { (pkg, profile) ->
+                pref[getProfileKey(pkg)] = profileJson.encodeToString(profile)
+            }
             val current = pref[ADDED_PACKAGES]?.let { Json.decodeFromString<List<String>>(it) } ?: emptyList()
-            pref[ADDED_PACKAGES] = Json.encodeToString((current + backup.addedPackages + backup.layouts.keys).distinct())
+            pref[ADDED_PACKAGES] = Json.encodeToString(
+                (current + backup.addedPackages + backup.layouts.keys + backup.profiles.keys).distinct()
+            )
             backup.pointerSensitivity?.let { pref[POINTER_SENSITIVITY] = it }
             backup.overlayOpacity?.let { pref[OVERLAY_OPACITY] = it }
         }

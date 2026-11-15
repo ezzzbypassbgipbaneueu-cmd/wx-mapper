@@ -11,6 +11,12 @@ object TypingState {
 
     /** true enquanto o serviço de detecção estiver ativado nas configurações de acessibilidade. */
     val serviceConnected = MutableStateFlow(false)
+
+    /**
+     * Último app (que não é o próprio mapper) que abriu uma janela. O overlay usa isso para
+     * trocar sozinho para o perfil do jogo que você abriu, mesmo sem abrir pelo launcher do WX.
+     */
+    val foregroundPackage = MutableStateFlow<String?>(null)
 }
 
 /**
@@ -40,6 +46,7 @@ class TypingDetectorService : AccessibilityService() {
             // Troca de tela / janela / diálogo.
             AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> {
                 TypingState.editableFocused.value = false
+                event.packageName?.toString()?.let { TypingState.foregroundPackage.value = it }
             }
         }
     }

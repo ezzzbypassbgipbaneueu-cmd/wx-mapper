@@ -7,6 +7,8 @@ import android.app.Service
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.content.res.Configuration
+import android.hardware.display.DisplayManager
 import android.os.Build
 import android.view.View
 import android.graphics.PixelFormat
@@ -125,6 +127,77 @@ class FloatingBubbleService : Service() {
     private var floatingBubbleView: ComposeView? = null
 
 
+
+    // ---- Captura do ponteiro (cursor custom) ------------------------------------------------
+    // O Android SOLTA a captura do ponteiro sozinho quando a janela perde o foco, é recriada ou
+    // redimensionada (girar a tela, notificação, teclado, trocar de app...). Sem a captura, o
+    // mouse volta a ser o cursor padrão do sistema e o cursor custom para de mexer.
+    // Aqui a captura é pedida de novo sempre que isso acontece.
+    private var captureAttempts = 0
+    private val captureRunnable = Runnable { tryAcquirePointerCapture() }
+    private var displayListenerRegistered = false
+
+    private val displayListener = object : DisplayManager.DisplayListener {
+        override fun onDisplayAdded(displayId: Int) {}
+        override fun onDisplayRemoved(displayId: Int) {}
+        override fun onDisplayChanged(displayId: Int) {
+            if (displayId == android.view.Display.DEFAULT_DISPLAY) onScreenChanged()
+        }
+    }
+
+    private fun shouldHoldCapture(): Boolean {
+        val sm = stateManager.get()
+        return containerRoot != null && !sm.isBubbleExpanded.value && !sm.isTypingMode.value
+    }
+
+    /** Agenda (com debounce) uma nova tentativa de captura. */
+    private fun scheduleCapture(delayMs: Long = 0L, resetAttempts: Boolean = true) {
+        val v = containerView ?: return
+        if (resetAttempts) captureAttempts = 0
+        v.removeCallbacks(captureRunnable)
+        v.postDelayed(captureRunnable, delayMs)
+    }
+
+    private fun tryAcquirePointerCapture() {
+        val v = containerView ?: return
+        if (!shouldHoldCapture()) return
+        if (!v.isAttachedToWindow) {
+            if (captureAttempts++ < 20) scheduleCapture(200, resetAttempts = false)
+            return
+        }
+        if (!v.hasFocus()) v.requestFocus()
+        if (!v.hasPointerCapture()) v.requestPointerCapture()
+        // Se a janela ainda não tem foco (rotação em andamento), tenta de novo em instantes.
+        if (!v.hasPointerCapture() && captureAttempts++ < 20) {
+            scheduleCapture(250, resetAttempts = false)
+        }
+    }
+
+    /** Rotação / mudança de tela: refaz tamanho da janela, posição do cursor e captura. */
+    private fun onScreenChanged() {
+        val root = containerRoot ?: return
+        root.removeCallbacks(screenChangedRunnable)
+        // Espera a rotação terminar de aplicar antes de medir.
+        root.postDelayed(screenChangedRunnable, 200)
+    }
+
+    private val screenChangedRunnable = Runnable {
+        val root = containerRoot ?: return@Runnable
+        val sm = stateManager.get()
+        sm.onScreenSizeChanged()
+        try {
+            sm.windowManager.updateViewLayout(root, itemsContainerLP)
+        } catch (_: Exception) {
+        }
+        root.post { sm.refreshKeyMapping() }
+        scheduleCapture(100)
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        onScreenChanged()
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_TOGGLE_RECORDING) {
             // Ação da notificação: esconde/mostra tudo sem recriar o overlay.
@@ -228,6 +301,14 @@ class FloatingBubbleService : Service() {
                     FrameLayout.LayoutParams.MATCH_PARENT
                 )
             )
+            // Perdeu a captura sem a gente pedir (rotação, foco...): pede de novo.
+            onPointerCaptureLost = {
+                if (shouldHoldCapture()) scheduleCapture(50)
+            }
+            // A janela voltou a ter foco: é quando a captura pode ser retomada.
+            onWindowFocusGained = {
+                if (shouldHoldCapture()) scheduleCapture(0)
+            }
             setViewTreeLifecycleOwner(lifecycleOwner)
             setViewTreeSavedStateRegistryOwner(lifecycleOwner)
             // Mede onde a janela realmente está na tela (origem) e corrige cursor/botões.
@@ -236,6 +317,8 @@ class FloatingBubbleService : Service() {
                 v.getLocationOnScreen(loc)
                 stateManager.get().onOverlayWindowPositioned(loc[0], loc[1])
                 if (skipActive) ScreenshotExclusion.setSkip(v, true)
+                // Janela redimensionada (rotação etc.): garante a captura do ponteiro.
+                if (shouldHoldCapture() && !(containerView?.hasPointerCapture() ?: true)) scheduleCapture(100)
             }
         }
 
@@ -326,6 +409,11 @@ class FloatingBubbleService : Service() {
         stateManager.get().windowManager.addView(containerRoot, itemsContainerLP)
         floatingBubbleLP.y = 200
         stateManager.get().windowManager.addView(floatingBubbleView, floatingBubbleLP)
+        if (!displayListenerRegistered) {
+            getSystemService(DisplayManager::class.java)
+                .registerDisplayListener(displayListener, android.os.Handler(android.os.Looper.getMainLooper()))
+            displayListenerRegistered = true
+        }
         containerView?.postDelayed({
             val sm = stateManager.get()
             sm.refreshKeyMapping()
@@ -372,6 +460,7 @@ class FloatingBubbleService : Service() {
                     containerView?.clearFocus()
                     containerView?.requestFocus()
                     containerView?.requestPointerCapture()
+                    scheduleCapture(150)
                 }
             }
         }
@@ -488,6 +577,7 @@ class FloatingBubbleService : Service() {
                         stateManager.get().onFocusLost()
                         view.requestFocus()
                         view.requestPointerCapture()
+                        scheduleCapture(150)
                     }
                 }
             }
@@ -510,6 +600,12 @@ class FloatingBubbleService : Service() {
     }
 
     private fun removeAllViews() {
+        if (displayListenerRegistered) {
+            getSystemService(DisplayManager::class.java).unregisterDisplayListener(displayListener)
+            displayListenerRegistered = false
+        }
+        containerView?.removeCallbacks(captureRunnable)
+        containerRoot?.removeCallbacks(screenChangedRunnable)
         containerRoot?.let {
             stateManager.get().windowManager.removeViewImmediate(it)
         }
@@ -633,10 +729,18 @@ class FloatingBubbleService : Service() {
                             top.linkTo(parent.top)
                             bottom.linkTo(parent.bottom)
                         }) {
-                    MenuItems(onItemClick = {
-                        onAddItem(it)
-                        itemsMenuVisible = false
-                    })
+                    val activeGame by stateManager.get().activePackage.collectAsState()
+                    MenuItems(
+                        gameName = activeGame?.let { stateManager.get().labelFor(it) } ?: "",
+                        onAddWasdKeys = {
+                            stateManager.get().addWasdKeys()
+                            itemsMenuVisible = false
+                        },
+                        onItemClick = {
+                            onAddItem(it)
+                            itemsMenuVisible = false
+                        }
+                    )
                 }
                 AnimatedVisibility(
                     visible = (settingsLayoutVisible),
@@ -788,6 +892,18 @@ fun PreviewFloatingBubble() {
 /** Raiz do overlay: intercepta toda tecla antes de qualquer view filha (não depende de foco interno). */
 class KeyCaptureFrameLayout(context: Context) : FrameLayout(context) {
     var keyInterceptor: ((KeyEvent) -> Boolean)? = null
+    var onPointerCaptureLost: (() -> Unit)? = null
+    var onWindowFocusGained: (() -> Unit)? = null
+
+    override fun onPointerCaptureChange(hasCapture: Boolean) {
+        super.onPointerCaptureChange(hasCapture)
+        if (!hasCapture) onPointerCaptureLost?.invoke()
+    }
+
+    override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
+        super.onWindowFocusChanged(hasWindowFocus)
+        if (hasWindowFocus) onWindowFocusGained?.invoke()
+    }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         if (keyInterceptor?.invoke(event) == true) return true

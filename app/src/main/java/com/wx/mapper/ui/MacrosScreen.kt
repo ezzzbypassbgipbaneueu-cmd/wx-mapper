@@ -40,14 +40,11 @@ import com.wx.mapper.ui.theme.GlassCard
 import com.wx.mapper.ui.theme.WxBackground
 import com.wx.mapper.util.keyCodeToString
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.serialization.Serializable
-
-@Serializable
-object MacrosScreen
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MacrosScreen(
+    gameName: String = "",
     appConfig: AppConfig,
     onNavigateBack: () -> Unit,
     onSave: (AppConfig) -> Unit,
@@ -82,7 +79,7 @@ fun MacrosScreen(
         modifier = Modifier.background(WxBackground),
         topBar = {
             TopAppBar(
-                title = { Text("Macros") },
+                title = { Text(if (gameName.isBlank()) "Macros" else "Macros · $gameName") },
                 navigationIcon = {
                     IconButton(onClick = { if (editing != null) editingId = null else onNavigateBack() }) {
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Voltar")

@@ -257,7 +257,9 @@ fun ItemsContainer(
                             }
                         }
                         LaunchedEffect(editingEnabled) {
-                            if (editingEnabled) keyFocusRequester.requestFocus()
+                            // Só foca sozinha a tecla ainda sem atalho: assim as teclas já ligadas
+                            // (ex.: o WASD) não são trocadas sem querer ao apertar uma tecla.
+                            if (editingEnabled && item.keyCode == null) keyFocusRequester.requestFocus()
                         }
 
                         KeyCircular(
@@ -384,6 +386,8 @@ fun DraggableItem(
 @Composable
 fun MenuItems(
     modifier: Modifier = Modifier,
+    gameName: String = "",
+    onAddWasdKeys: () -> Unit = {},
     onItemClick: (DraggableItemType) -> Unit
 ) {
     val state = rememberLazyGridState()
@@ -396,7 +400,7 @@ fun MenuItems(
     ) {
         Text(
             modifier = Modifier.padding(top = 4.dp, start = 8.dp),
-            text = "Add keymapping for:",
+            text = if (gameName.isBlank()) "Adicionar ao keymap:" else "Keymap de $gameName",
             style = MaterialTheme.typography.labelSmall
         )
         LazyVerticalGrid(
@@ -420,6 +424,22 @@ fun MenuItems(
                     }
                     Text(
                         "Key",
+                        style = TextStyle(fontSize = 8.sp),
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                    )
+                }
+            }
+            item(contentType = "wasd_keys") {
+                // Atalho: cria W, A, S e D como 4 teclas comuns já ligadas (cada uma vira um ponto da tela).
+                Column(
+                    Modifier.clickable(onClick = onAddWasdKeys),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Box(itemModifier, contentAlignment = Alignment.Center) {
+                        Text("WASD", color = Color.Cyan, style = TextStyle(fontSize = 9.sp))
+                    }
+                    Text(
+                        "4 teclas",
                         style = TextStyle(fontSize = 8.sp),
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
                     )
