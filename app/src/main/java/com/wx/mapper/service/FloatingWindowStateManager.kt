@@ -293,6 +293,27 @@ class FloatingWindowStateManager @Inject constructor(
         }
     }
 
+    /**
+     * A tela mudou (rotação etc.): mantém o cursor na mesma posição relativa e dentro dos
+     * limites novos. Sem isso ele podia ficar fora da tela até o próximo movimento.
+     */
+    fun onScreenSizeChanged() {
+        val w = screenWidthPx
+        val h = screenHeightPx
+        if (w <= 0 || h <= 0) return
+        val old = _mousePointerOffset.value
+        val ow = if (lastScreenW > 0) lastScreenW else w
+        val oh = if (lastScreenH > 0) lastScreenH else h
+        lastScreenW = w
+        lastScreenH = h
+        val moved = Offset(
+            (old.x * w / ow).coerceIn(0f, (w - 1).coerceAtLeast(0).toFloat()),
+            (old.y * h / oh).coerceIn(0f, (h - 1).coerceAtLeast(0).toFloat())
+        )
+        _mousePointerOffset.value = moved
+        eventHandler.mousePointerPosition = moved
+    }
+
     /** Reaplica o mapeamento depois que o overlay já foi composto e os tamanhos reais foram medidos. */
     fun refreshKeyMapping() {
         if (!_isBubbleExpanded.value) eventHandler.updateKeyMapping(containerItems.value)
