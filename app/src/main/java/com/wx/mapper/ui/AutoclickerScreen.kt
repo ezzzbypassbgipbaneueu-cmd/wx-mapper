@@ -97,7 +97,7 @@ fun AutoclickerScreen(
             }
 
             GlassCard {
-                Text(if (cfg.holdMs == 0L) "Tempo do toque: instantâneo (0 ms)" else "Tempo do toque: ${cfg.holdMs} ms")
+                Text(if (cfg.holdMs == 0L) "Tempo do toque: instantâneo (0 ms)" else "Tempo do toque: ${cfg.holdMs} ms (jogos de 60 fps: use 17+ ms)")
                 Slider(
                     value = cfg.holdMs.toFloat(),
                     onValueChange = { cfg = cfg.copy(holdMs = it.roundToInt().toLong()) },

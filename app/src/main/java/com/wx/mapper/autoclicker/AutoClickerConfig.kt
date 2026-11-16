@@ -38,7 +38,7 @@ data class AutoClickerConfig(
         const val MAX_CPS = 200f
         const val DEFAULT_CPS = 30f
         const val MIN_HOLD_MS = 0L
-        const val MAX_HOLD_MS = 30L
-        const val DEFAULT_HOLD_MS = 3L
+        const val MAX_HOLD_MS = 50L
+        const val DEFAULT_HOLD_MS = 12L
     }
 }

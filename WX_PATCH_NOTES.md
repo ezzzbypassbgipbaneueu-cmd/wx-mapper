@@ -21,3 +21,8 @@ The source changes have not been compiled on an Android SDK in this environment.
 ## Modo digitar (automático e manual)
 - TypingDetectorService: ignora eventos do teclado virtual, confere o foco real (FOCUS_INPUT) com atraso antes de desligar e mantém ligado enquanto chega texto.
 - FloatingBubbleService: recaptura de ponteiro agendada não roda mais se o modo digitar estiver ativo.
+
+## Autoclicker (precisão)
+- Worker em thread própria de prioridade alta, cronograma absoluto (CPS fiel, sem acumular atraso).
+- Retomar ao soltar o botão esquerdo agora acorda o worker na hora (antes: até 8 ms de poll).
+- Tempo do toque: teto de 50 ms, padrão 12 ms, e o toque não é mais limitado a metade do ciclo (só deixa 3 ms de respiro).
