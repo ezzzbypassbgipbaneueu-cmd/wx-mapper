@@ -3,6 +3,7 @@ package com.wx.mapper.input
 import android.view.MotionEvent
 import androidx.compose.ui.geometry.Offset
 import com.wx.mapper.autoclicker.AutoClicker
+import com.wx.mapper.autoclicker.WxHighPriorityDispatcher
 import com.wx.mapper.autoclicker.AutoClickerConfig
 import com.wx.mapper.autoclicker.ClickPositionMode
 import com.wx.mapper.domain.KEYCODE_LMC
@@ -20,7 +21,7 @@ import kotlinx.coroutines.cancel
 class WxActions(
     injector: EventInjector,
     private val pointerPosition: () -> Offset,
-    private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
+    private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + WxHighPriorityDispatcher),
 ) {
     val autoClicker = AutoClicker(scope, injector)
     val macroPlayer = MacroPlayer(scope, injector)

@@ -42,7 +42,7 @@ class WxTests {
     @Test
     fun autoclicker_30cps_clicks_about_30_per_second_and_stops() = runTest {
         val inj = FakeInjector()
-        val clicker = AutoClicker(backgroundScope, inj)
+        val clicker = AutoClicker(backgroundScope, inj, clock = { testScheduler.currentTime * 1_000_000L })
         clicker.start(AutoClickerConfig(cps = 30f)) { Offset(5f, 6f) }
         runCurrent()
         advanceTimeBy(1000)
