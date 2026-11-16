@@ -17,3 +17,7 @@ This patch is a first implementation pass, not a finished release.
 
 ## Validation
 The source changes have not been compiled on an Android SDK in this environment. Run the GitHub Actions build before installing.
+
+## Modo digitar (automático e manual)
+- TypingDetectorService: ignora eventos do teclado virtual, confere o foco real (FOCUS_INPUT) com atraso antes de desligar e mantém ligado enquanto chega texto.
+- FloatingBubbleService: recaptura de ponteiro agendada não roda mais se o modo digitar estiver ativo.

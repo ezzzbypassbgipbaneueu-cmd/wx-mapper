@@ -449,6 +449,8 @@ class FloatingBubbleService : Service() {
                 itemsContainerLP.flags = base or
                         WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
                         WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                // Cancela qualquer recaptura agendada antes de largar o foco.
+                containerView?.removeCallbacks(captureRunnable)
                 containerView?.releasePointerCapture()
                 stateManager.get().clearActivePointers()
                 wm.updateViewLayout(root, itemsContainerLP)
@@ -457,6 +459,8 @@ class FloatingBubbleService : Service() {
                 itemsContainerLP.flags = base or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
                 wm.updateViewLayout(root, itemsContainerLP)
                 containerView?.post {
+                    // Se virou modo digitar nesse meio tempo, NÃO pega foco nem captura.
+                    if (!shouldHoldCapture()) return@post
                     containerView?.clearFocus()
                     containerView?.requestFocus()
                     containerView?.requestPointerCapture()
