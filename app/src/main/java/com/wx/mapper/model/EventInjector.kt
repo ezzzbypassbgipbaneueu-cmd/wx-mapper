@@ -13,5 +13,11 @@ interface EventInjector {
     fun updatePointerPosition(pointerID: Int, position:Offset)
     fun clear()
     fun releasePointer(pointerID: Int)
+
+    /** Toque instantâneo (DOWN+UP no mesmo instante). Padrão: dois eventos na fila. */
+    fun tap(pointerID: Int, position: Offset) {
+        injectPointer(pointerID, position)
+        releasePointer(pointerID)
+    }
     suspend fun injected(pointerID: Int):Boolean
 }

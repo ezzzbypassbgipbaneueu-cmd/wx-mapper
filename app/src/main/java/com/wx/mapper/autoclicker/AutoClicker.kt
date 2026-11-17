@@ -88,10 +88,15 @@ class AutoClicker(
                         val holdNs = (c.holdMs * 1_000_000L).coerceIn(0L, (periodNs - MIN_REST_NS).coerceAtLeast(0L))
 
                         val position = currentPosition?.invoke() ?: Offset.Zero
-                        val downAt = clock()
-                        injector.injectPointer(pointerId, position)
-                        waitUntil(downAt + holdNs)
-                        injector.releasePointer(pointerId)
+                        if (holdNs == 0L) {
+                            // Toque instantâneo: DOWN+UP atômicos (mesmo timestamp, sem esperar o sistema).
+                            injector.tap(pointerId, position)
+                        } else {
+                            val downAt = clock()
+                            injector.injectPointer(pointerId, position)
+                            waitUntil(downAt + holdNs)
+                            injector.releasePointer(pointerId)
+                        }
 
                         next += periodNs
                         // Se atrasou muito (CPU ocupada), não "recupera" disparando em rajada.

@@ -41,6 +41,11 @@ class ShizukuSystemServerAPi {
 //               Log.d(TAG, "inject: injecting: $event")
                injectInputEventFunction?.invoke(inputManagerInstance, event, 1)
            }
+
+           // Modo 0 = ASYNC: não espera o sistema responder, então DOWN e UP saem colados.
+           override fun injectFast(event: InputEvent) {
+               injectInputEventFunction?.invoke(inputManagerInstance, event, 0)
+           }
        })
     }
 

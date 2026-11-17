@@ -1,5 +1,6 @@
 package com.wx.mapper.domain
 
+import android.os.SystemClock
 import android.view.InputEvent
 import android.view.MotionEvent
 import androidx.compose.ui.geometry.Offset
@@ -31,6 +32,9 @@ abstract class EventInjectorImpl(private val eventManager: EventManager = EventM
     // "travarem" ou soltarem sozinhas. Com trySend a ordem de chamada é preservada.
     private val taskQueue = Channel<suspend () -> Unit>(Channel.UNLIMITED)
     abstract fun inject(event: InputEvent)
+
+    /** Injeção sem esperar resposta do sistema (menor latência). Por padrão igual a [inject]. */
+    protected open fun injectFast(event: InputEvent) = inject(event)
 
     init {
         scope.launch {
@@ -126,6 +130,31 @@ abstract class EventInjectorImpl(private val eventManager: EventManager = EventM
         enqueue {
             if (eventManager.offsetPointer(pointerID, position)) {
                 injectMotion(MotionEvent.ACTION_MOVE)
+            }
+        }
+    }
+
+    /**
+     * Toque de duração zero: DOWN e UP saem na MESMA tarefa da fila, com o mesmo timestamp e sem
+     * esperar o sistema responder entre eles. A duração real vira só o tempo de entregar os 2 eventos.
+     */
+    override fun tap(pointerID: Int, position: Offset) {
+        enqueue {
+            val t = SystemClock.uptimeMillis()
+            eventManager.addPointer(pointerID, position.x, position.y)
+            val down = eventManager.getPointerAction(pointerID, false)
+            if (down == -1) return@enqueue
+            eventManager.createMotionEvent(down, t)?.let {
+                injectFast(it)
+                it.recycle()
+            }
+            val up = eventManager.getPointerAction(pointerID, true)
+            if (up != -1) {
+                eventManager.createMotionEvent(up, t)?.let {
+                    injectFast(it)
+                    it.recycle()
+                }
+                eventManager.removePointer(pointerID)
             }
         }
     }
