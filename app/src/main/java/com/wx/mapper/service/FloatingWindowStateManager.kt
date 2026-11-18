@@ -559,6 +559,41 @@ class FloatingWindowStateManager @Inject constructor(
         }
     }
 
+    /** Jogos cadastrados (para a lista de perfis da bolinha). */
+    fun addedGames(): kotlinx.coroutines.flow.Flow<List<String>> =
+        dataStoreManager.getList(DataStoreManager.ADDED_PACKAGES)
+
+    private var profileSaveJob: Job? = null
+
+    /** Muda o autoclicker do jogo ativo sem sair do jogo; salva no perfil. */
+    fun updateAutoClicker(
+        transform: com.wx.mapper.autoclicker.AutoClickerConfig.() -> com.wx.mapper.autoclicker.AutoClickerConfig
+    ) {
+        val pkg = _activePackage.value ?: return
+        val updated = _profile.value.copy(autoClicker = _profile.value.autoClicker.transform().sanitized())
+        _profile.value = updated
+        applyEffectiveConfig()
+        // Salva só quando parar de mexer no slider (evita o valor "voltar" durante o arraste).
+        profileSaveJob?.cancel()
+        profileSaveJob = scope.launch {
+            kotlinx.coroutines.delay(250)
+            dataStoreManager.saveProfile(pkg, updated)
+        }
+    }
+
+    /** Galeria de PNGs de cursor salvos. */
+    fun cursorImages(): List<java.io.File> = com.wx.mapper.util.CursorImages.list(context)
+
+    fun selectCursorImage(file: java.io.File) = updateCursorSettings {
+        copy(
+            cursorImagePath = file.absolutePath,
+            cursorImageVersion = System.currentTimeMillis(),
+            cursorStyle = CursorStyle.IMAGE
+        )
+    }
+
+    fun updateCursorHotspot(center: Boolean) = updateCursorSettings { copy(cursorImageHotspotCenter = center) }
+
     fun updateAutoTyping(enabled: Boolean) = updateCursorSettings { copy(autoTypingMode = enabled) }
 
     fun updateCursorStyle(style: CursorStyle) = updateCursorSettings { copy(cursorStyle = style) }

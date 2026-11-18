@@ -25,6 +25,7 @@ import androidx.compose.foundation.Image
 import com.wx.mapper.util.keyCodeToString
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.foundation.layout.Column
@@ -34,6 +35,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -46,6 +48,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.input.pointer.pointerInput
@@ -70,6 +73,12 @@ import com.wx.mapper.ui.overlay.ItemsContainer
 import com.wx.mapper.ui.overlay.MenuItems
 import com.wx.mapper.ui.overlay.ServiceLifecycleOwner
 import com.wx.mapper.ui.overlay.SettingsLayout
+import com.wx.mapper.ui.overlay.CursorGlyph
+import com.wx.mapper.ui.overlay.CursorPanel
+import com.wx.mapper.ui.overlay.GameEntry
+import com.wx.mapper.ui.overlay.ProfilePanel
+import com.wx.mapper.ui.overlay.RailButton
+import com.wx.mapper.model.CursorStyle
 import com.wx.mapper.ui.theme.WxTheme
 import dagger.Lazy
 import dagger.hilt.android.AndroidEntryPoint
@@ -631,10 +640,14 @@ class FloatingBubbleService : Service() {
         val isExpanded by stateManager.get().isBubbleExpanded.collectAsState()
         var itemsMenuVisible by remember { mutableStateOf(false) }
         var settingsLayoutVisible by remember { mutableStateOf(false) }
+        var profileVisible by remember { mutableStateOf(false) }
+        var cursorVisible by remember { mutableStateOf(false) }
         LaunchedEffect(isExpanded) {
             opacity = if (isExpanded) 1f else 0.5f
             itemsMenuVisible = isExpanded && itemsMenuVisible
             settingsLayoutVisible = isExpanded && settingsLayoutVisible
+            profileVisible = isExpanded && profileVisible
+            cursorVisible = isExpanded && cursorVisible
         }
         Box(
             modifier = modifier
@@ -699,24 +712,56 @@ class FloatingBubbleService : Service() {
                         top.linkTo(bubble.bottom)
                         end.linkTo(bubble.end)
                     }) {
-                    Column {
-                        IconButton(onClick = {
-                            itemsMenuVisible = !itemsMenuVisible
+                    Column(
+                        modifier = Modifier.padding(bottom = 6.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        RailButton(selected = itemsMenuVisible, onClick = {
+                            val next = !itemsMenuVisible
+                            itemsMenuVisible = next
                             settingsLayoutVisible = false
+                            profileVisible = false
+                            cursorVisible = false
                         }) {
                             Icon(
                                 imageVector = Icons.Rounded.Add,
-                                contentDescription = "Add Item"
+                                contentDescription = "Adicionar item",
+                                tint = MaterialTheme.colorScheme.onSurface
                             )
                         }
-
-                        IconButton(onClick = {
-                            settingsLayoutVisible = !settingsLayoutVisible
+                        RailButton(selected = profileVisible, onClick = {
+                            val next = !profileVisible
+                            profileVisible = next
                             itemsMenuVisible = false
+                            settingsLayoutVisible = false
+                            cursorVisible = false
+                        }) {
+                            Icon(
+                                imageVector = Icons.Rounded.Person,
+                                contentDescription = "Perfil do jogo",
+                                tint = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                        RailButton(selected = cursorVisible, onClick = {
+                            val next = !cursorVisible
+                            cursorVisible = next
+                            itemsMenuVisible = false
+                            settingsLayoutVisible = false
+                            profileVisible = false
+                        }) {
+                            CursorGlyph(color = MaterialTheme.colorScheme.onSurface)
+                        }
+                        RailButton(selected = settingsLayoutVisible, onClick = {
+                            val next = !settingsLayoutVisible
+                            settingsLayoutVisible = next
+                            itemsMenuVisible = false
+                            profileVisible = false
+                            cursorVisible = false
                         }) {
                             Icon(
                                 imageVector = Icons.Rounded.Settings,
-                                contentDescription = "Settings",
+                                contentDescription = "Ajustes",
                                 tint = MaterialTheme.colorScheme.onSurface
                             )
                         }
@@ -743,6 +788,87 @@ class FloatingBubbleService : Service() {
                         onItemClick = {
                             onAddItem(it)
                             itemsMenuVisible = false
+                        }
+                    )
+                }
+                AnimatedVisibility(
+                    visible = profileVisible,
+                    enter = fadeIn(),
+                    exit = fadeOut(),
+                    modifier = Modifier
+                        .padding(start = 4.dp)
+                        .constrainAs(otherLayout) {
+                            start.linkTo(bubble.end)
+                            top.linkTo(parent.top)
+                            bottom.linkTo(parent.bottom)
+                        }) {
+                    val sm = stateManager.get()
+                    val activeGame by sm.activePackage.collectAsState()
+                    val keysConfig by sm.keysConfig.collectAsState()
+                    val sensitivity by sm.pointerSensitivity.collectAsState()
+                    val gamesFlow = remember { sm.addedGames() }
+                    val packages by gamesFlow.collectAsState(initial = emptyList())
+                    val games = remember(packages) { packages.map { GameEntry(it, sm.labelFor(it)) } }
+                    ProfilePanel(
+                        games = games,
+                        activePackage = activeGame,
+                        autoClicker = keysConfig.autoClicker,
+                        pointerSensitivity = sensitivity,
+                        onSelectGame = { sm.switchGame(it, announce = true) },
+                        onAutoClickerChange = { updated -> sm.updateAutoClicker { updated } },
+                        onPointerSensChange = { sm.pointerSensitivity.value = it },
+                        onManageProfiles = {
+                            val intent = Intent(baseContext, MainActivity::class.java).apply {
+                                flags =
+                                    Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
+                            }
+                            baseContext.startActivity(intent)
+                            sm.onFloatingBubbleClick()
+                        }
+                    )
+                }
+                AnimatedVisibility(
+                    visible = cursorVisible,
+                    enter = fadeIn(),
+                    exit = fadeOut(),
+                    modifier = Modifier
+                        .padding(start = 4.dp)
+                        .constrainAs(otherLayout) {
+                            start.linkTo(bubble.end)
+                            top.linkTo(parent.top)
+                            bottom.linkTo(parent.bottom)
+                        }) {
+                    val sm = stateManager.get()
+                    val keysConfig by sm.keysConfig.collectAsState()
+                    val images = remember { sm.cursorImages() }
+                    CursorPanel(
+                        style = keysConfig.cursorStyle,
+                        sizeDp = keysConfig.cursorSizeDp,
+                        color = keysConfig.cursorColor,
+                        opacity = keysConfig.cursorOpacity,
+                        images = images,
+                        selectedImagePath = keysConfig.cursorImagePath,
+                        hotspotCenter = keysConfig.cursorImageHotspotCenter,
+                        onStyleChange = { style ->
+                            if (style == CursorStyle.IMAGE && keysConfig.cursorImagePath == null) {
+                                sm.cycleCursorImage()
+                            } else {
+                                sm.updateCursorStyle(style)
+                            }
+                        },
+                        onSizeChange = { sm.updateCursorSize(it) },
+                        onColorChange = { sm.updateCursorColor(it) },
+                        onOpacityChange = { sm.updateCursorOpacity(it) },
+                        onSelectImage = { sm.selectCursorImage(it) },
+                        onHotspotChange = { sm.updateCursorHotspot(it) },
+                        onAddImage = {
+                            val intent = Intent(baseContext, MainActivity::class.java).apply {
+                                flags =
+                                    Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
+                                action = MainActivity.INTENT_ACTION_SETTINGS
+                            }
+                            baseContext.startActivity(intent)
+                            sm.onFloatingBubbleClick()
                         }
                     )
                 }

@@ -7,6 +7,7 @@ import android.view.KeyEvent
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -138,6 +139,7 @@ fun FloatingBubble(
                 modifier = modifier
                     .clip(CircleShape)
                     .background(Color.Black)
+                    .border(1.5.dp, Color.White.copy(alpha = 0.25f), CircleShape)
             )
         }
     }
@@ -689,6 +691,7 @@ fun SettingsLayout(
     onCursorOpacityChange: (Float) -> Unit = {},
     cursorHasImage: Boolean = false,
     onNextCursorImage: () -> Unit = {},
+    showCursorSection: Boolean = false,
     autoTypingMode: Boolean = true,
     onAutoTypingChange: (Boolean) -> Unit = {},
     onTypingModeClick: () -> Unit = {},
@@ -745,69 +748,71 @@ fun SettingsLayout(
             valueRange = 0.0f..1.0f,
             steps = 9
         )
-        HorizontalDivider()
-        Text(
-            text = "Cursor",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)
-        )
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Style", modifier = Modifier.weight(1f))
-            TextButton(onClick = {
-                val styles = CursorStyle.values().filter { it != CursorStyle.IMAGE || cursorHasImage }
-                val next = (styles.indexOf(cursorStyle) + 1) % styles.size
-                onCursorStyleChange(styles[next])
-            }) {
-                Text(cursorStyle.name.lowercase().replaceFirstChar { it.uppercase() })
+        if (showCursorSection) {
+            HorizontalDivider()
+            Text(
+                text = "Cursor",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Style", modifier = Modifier.weight(1f))
+                TextButton(onClick = {
+                    val styles = CursorStyle.values().filter { it != CursorStyle.IMAGE || cursorHasImage }
+                    val next = (styles.indexOf(cursorStyle) + 1) % styles.size
+                    onCursorStyleChange(styles[next])
+                }) {
+                    Text(cursorStyle.name.lowercase().replaceFirstChar { it.uppercase() })
+                }
             }
-        }
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Size", modifier = Modifier.weight(1f))
-            Text("${cursorSizeDp.roundToInt()} dp")
-        }
-        Slider(
-            value = cursorSizeDp,
-            onValueChange = onCursorSizeChange,
-            valueRange = 12f..64f
-        )
-        Text("Color", style = MaterialTheme.typography.bodyMedium)
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            listOf(
-                0xFFFFFFFF.toInt(),
-                0xFF000000.toInt(),
-                0xFFFF5252.toInt(),
-                0xFF448AFF.toInt(),
-                0xFF69F0AE.toInt(),
-                0xFFFFD740.toInt()
-            ).forEach { swatch ->
-                Box(
-                    modifier = Modifier
-                        .size(24.dp)
-                        .clip(CircleShape)
-                        .background(Color(swatch))
-                        .clickable { onCursorColorChange(swatch) }
-                )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Size", modifier = Modifier.weight(1f))
+                Text("${cursorSizeDp.roundToInt()} dp")
             }
-        }
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Opacity", modifier = Modifier.weight(1f))
-            Text("${(cursorOpacity * 100).roundToInt()} %")
-        }
-        Slider(
-            value = cursorOpacity,
-            onValueChange = onCursorOpacityChange,
-            valueRange = 0.1f..1f
-        )
-        if (cursorHasImage) {
-            TextButton(onClick = onNextCursorImage) { Text("Próxima imagem salva") }
-        }
-        TextButton(onClick = onAdvancedSettingsClick) {
-            Text(if (cursorHasImage) "Gerenciar imagens do cursor…" else "Adicionar imagem de cursor…")
+            Slider(
+                value = cursorSizeDp,
+                onValueChange = onCursorSizeChange,
+                valueRange = 12f..64f
+            )
+            Text("Color", style = MaterialTheme.typography.bodyMedium)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                listOf(
+                    0xFFFFFFFF.toInt(),
+                    0xFF000000.toInt(),
+                    0xFFFF5252.toInt(),
+                    0xFF448AFF.toInt(),
+                    0xFF69F0AE.toInt(),
+                    0xFFFFD740.toInt()
+                ).forEach { swatch ->
+                    Box(
+                        modifier = Modifier
+                            .size(24.dp)
+                            .clip(CircleShape)
+                            .background(Color(swatch))
+                            .clickable { onCursorColorChange(swatch) }
+                    )
+                }
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Opacity", modifier = Modifier.weight(1f))
+                Text("${(cursorOpacity * 100).roundToInt()} %")
+            }
+            Slider(
+                value = cursorOpacity,
+                onValueChange = onCursorOpacityChange,
+                valueRange = 0.1f..1f
+            )
+            if (cursorHasImage) {
+                TextButton(onClick = onNextCursorImage) { Text("Próxima imagem salva") }
+            }
+            TextButton(onClick = onAdvancedSettingsClick) {
+                Text(if (cursorHasImage) "Gerenciar imagens do cursor…" else "Adicionar imagem de cursor…")
+            }
         }
         HorizontalDivider()
         Text(
