@@ -328,6 +328,10 @@ class FloatingWindowStateManager @Inject constructor(
                 DraggableItem.VariableKey(itemID, position = offset, size = 0)
             }
 
+            DraggableItemType.TOGGLE_KEY -> {
+                DraggableItem.VariableKey(itemID, position = offset, size = 0, toggle = true)
+            }
+
             DraggableItemType.WASD_KEY -> {
                 DraggableItem.WASDGroup(itemID, offset)
             }

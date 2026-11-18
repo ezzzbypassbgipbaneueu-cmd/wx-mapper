@@ -271,7 +271,10 @@ fun ItemsContainer(
                                 onRemove(item.id)
                             },
                             onClick = { keyFocusRequester.requestFocus() },
-                            borderColor = if (hasFocus) Color.Cyan else MaterialTheme.colorScheme.onSurface,
+                            // Laranja = tecla ALTERNAR (segura/solta a cada toque).
+                            borderColor = if (hasFocus) Color.Cyan
+                            else if (item.toggle) Color(0xFFFFB74D)
+                            else MaterialTheme.colorScheme.onSurface,
                             modifier = Modifier
                                 .onSizeChanged {
                                     item.size = it.width
@@ -427,6 +430,22 @@ fun MenuItems(
                     }
                     Text(
                         "Key",
+                        style = TextStyle(fontSize = 8.sp),
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                    )
+                }
+            }
+            item(contentType = DraggableItemType.TOGGLE_KEY) {
+                // Tecla ALTERNAR: um toque segura o ponto da tela, outro toque solta.
+                Column(
+                    Modifier.clickable(onClick = { onItemClick(DraggableItemType.TOGGLE_KEY) }),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Box(itemModifier, contentAlignment = Alignment.Center) {
+                        Text("\u21C4", color = Color(0xFFFFB74D))
+                    }
+                    Text(
+                        "Alternar",
                         style = TextStyle(fontSize = 8.sp),
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
                     )

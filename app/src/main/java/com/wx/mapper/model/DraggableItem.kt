@@ -20,10 +20,12 @@ sealed class DraggableItem {
         override val id: Int,
         override var position: Offset,
         var keyCode:Int? = null,
-        var size: Int
+        var size: Int,
+        /** true = tecla ALTERNAR: um toque segura o ponto da tela, outro toque solta. */
+        var toggle: Boolean = false
     ) : DraggableItem(){
         override fun copy(id: Int, position: Offset): DraggableItem =
-            VariableKey(id, position, keyCode, size)
+            VariableKey(id, position, keyCode, size, toggle)
 
     }
 
@@ -77,6 +79,8 @@ data class KeyMap(
     val position: Offset,
     val center: Offset? = null,
     val end: Offset? = null,
+    /** Tecla ALTERNAR (segura até apertar de novo). */
+    val toggle: Boolean = false,
 )
 
 enum class KeymapType {
@@ -86,5 +90,5 @@ enum class KeymapType {
 @Serializable
 enum class DraggableItemType {
     //do not change positions of existing items
-    KEY, WASD_KEY, SHOOTING_MODE, FIRE, BAG_MAP , SCOPE
+    KEY, WASD_KEY, SHOOTING_MODE, FIRE, BAG_MAP , SCOPE, TOGGLE_KEY
 }

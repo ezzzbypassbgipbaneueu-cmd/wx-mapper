@@ -71,3 +71,25 @@ class MixedModeTouchHandler(private val eventInjector: EventInjector) : MultiMod
     }
 
 }
+
+/**
+ * Tecla ALTERNAR: apertar a tecla uma vez SEGURA o toque no ponto escolhido; apertar de novo SOLTA.
+ * Soltar a tecla física não faz nada (o toque continua pressionado).
+ */
+class ToggleModeTouchHandler(private val eventInjector: EventInjector) : MultiModeTouchHandler {
+    override fun handleTouchEvent(
+        keyEvent: KeyEvent,
+        isPressed: Boolean,
+        pointerId: Int,
+        keyMap: KeyMap
+    ): Boolean {
+        if (keyEvent.action != MotionEvent.ACTION_DOWN) return isPressed
+        return if (isPressed) {
+            eventInjector.releasePointer(pointerId)
+            false
+        } else {
+            eventInjector.injectPointer(pointerId, keyMap.position, keyMap.end ?: keyMap.position)
+            true
+        }
+    }
+}

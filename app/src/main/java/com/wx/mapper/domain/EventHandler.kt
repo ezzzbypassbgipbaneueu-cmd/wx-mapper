@@ -107,6 +107,7 @@ class EventHandler(
 
     private var cancelableTouchHandler: MultiModeTouchHandler = MixedModeTouchHandler(eventInjector)
     private var normalTouchHandler: MultiModeTouchHandler = MixedModeTouchHandler(eventInjector)
+    private val toggleTouchHandler: MultiModeTouchHandler = ToggleModeTouchHandler(eventInjector)
 
 
     private fun keyId(keyCode: Int): Int =
@@ -258,7 +259,8 @@ class EventHandler(
                 }
             } else {
                 val id = keyId(keyCode)
-                mappedPressed[id]=normalTouchHandler.handleTouchEvent(
+                val handler = if (it.toggle) toggleTouchHandler else normalTouchHandler
+                mappedPressed[id]=handler.handleTouchEvent(
                     KeyEvent(KeyEvent.ACTION_DOWN, keyCode),
                     mappedPressed[id],
                     pointerId,
@@ -281,7 +283,8 @@ class EventHandler(
                 }
                 return
             }
-            mappedPressed[id] =  normalTouchHandler.handleTouchEvent(
+            val handler = if (it.toggle) toggleTouchHandler else normalTouchHandler
+            mappedPressed[id] =  handler.handleTouchEvent(
                 KeyEvent(KeyEvent.ACTION_UP, keyCode),
                 mappedPressed[id],
                 pointerId,
@@ -457,7 +460,7 @@ class EventHandler(
                 is DraggableItem.VariableKey -> {
                     val k = item.keyCode ?: return@forEach
                     val (start, end) = tapArea(item.position, item.size, PADDED_KEY_CIRCLE_RATIO)
-                    keyMap[k] = KeyMap(position = start, end = end)
+                    keyMap[k] = KeyMap(position = start, end = end, toggle = item.toggle)
                     alloc(k)
                 }
 
