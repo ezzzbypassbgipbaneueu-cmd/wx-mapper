@@ -60,6 +60,58 @@ abstract class EventInjectorImpl(private val eventManager: EventManager = EventM
         }
     }
 
+    /** MOVE sem esperar o sistema responder: a fila não trava atrás de um MOVE lento. */
+    private suspend fun injectMoveFast() {
+        val event = eventManager.createMotionEvent(MotionEvent.ACTION_MOVE)
+        event?.let {
+            injectFast(it)
+            it.recycle()
+        }
+    }
+
+    // ---- Movimentos do mouse agrupados (coalescing) ----
+    // Cada movimento do mouse virava 1 evento injetado. Com o jogo lento a fila enchia e o
+    // cursor/câmera ficava atrasado. Agora os movimentos pendentes são SOMADOS e saem num só MOVE
+    // (que já leva todos os dedos), então o custo no sistema não cresce com a taxa do mouse.
+    private val moveLock = Any()
+    private val pendingMoves = HashMap<Int, FloatArray>()
+    private var moveDrainScheduled = false
+    @Volatile private var lastMoveInjectMs = 0L
+    @Volatile private var moveMinIntervalMs = 0L
+
+    override fun setPerformanceMode(enabled: Boolean) {
+        moveMinIntervalMs = if (enabled) PERF_MOVE_INTERVAL_MS else 0L
+    }
+
+    private suspend fun drainMoves() {
+        var ids = IntArray(0)
+        var dxs = FloatArray(0)
+        var dys = FloatArray(0)
+        synchronized(moveLock) {
+            val n = pendingMoves.size
+            ids = IntArray(n)
+            dxs = FloatArray(n)
+            dys = FloatArray(n)
+            var i = 0
+            for ((id, acc) in pendingMoves) {
+                ids[i] = id
+                dxs[i] = acc[0]
+                dys[i] = acc[1]
+                i++
+            }
+            pendingMoves.clear()
+            moveDrainScheduled = false
+        }
+        var changed = false
+        for (i in ids.indices) {
+            if (eventManager.offsetPointer(ids[i], Offset(dxs[i], dys[i]))) changed = true
+        }
+        if (changed) {
+            lastMoveInjectMs = android.os.SystemClock.uptimeMillis()
+            injectMoveFast()
+        }
+    }
+
     private suspend fun downNow(pointerID: Int, x: Float, y: Float) {
         eventManager.addPointer(pointerID, x, y)
         val action = eventManager.getPointerAction(pointerID, false)
@@ -127,9 +179,25 @@ abstract class EventInjectorImpl(private val eventManager: EventManager = EventM
     }
 
     override fun updatePointerPosition(pointerID: Int, position: Offset) {
-        enqueue {
-            if (eventManager.offsetPointer(pointerID, position)) {
-                injectMotion(MotionEvent.ACTION_MOVE)
+        var schedule = false
+        synchronized(moveLock) {
+            val acc = pendingMoves.getOrPut(pointerID) { FloatArray(2) }
+            acc[0] += position.x
+            acc[1] += position.y
+            if (!moveDrainScheduled) {
+                moveDrainScheduled = true
+                schedule = true
+            }
+        }
+        if (!schedule) return
+        val wait = moveMinIntervalMs - (android.os.SystemClock.uptimeMillis() - lastMoveInjectMs)
+        if (wait <= 0L) {
+            enqueue { drainMoves() }
+        } else {
+            // Modo desempenho: segura o movimento por alguns ms SEM travar a fila (toques passam).
+            scope.launch {
+                delay(wait)
+                enqueue { drainMoves() }
             }
         }
     }
@@ -185,5 +253,6 @@ abstract class EventInjectorImpl(private val eventManager: EventManager = EventM
     private companion object {
         const val GESTURE_STEPS = 6
         const val GESTURE_STEP_MS = 12L
+        const val PERF_MOVE_INTERVAL_MS = 16L
     }
 }

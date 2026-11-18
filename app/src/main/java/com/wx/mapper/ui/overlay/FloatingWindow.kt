@@ -58,6 +58,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
@@ -583,7 +584,11 @@ fun MenuItems(
 
 @Composable
 fun CursorOverlay(
-    position: Offset,
+    /**
+     * Posição do cursor em coordenadas da TELA. É lida só na camada de desenho (graphicsLayer):
+     * mexer o mouse NÃO recompõe nem refaz o layout, só move o cursor.
+     */
+    position: () -> Offset,
     style: CursorStyle,
     sizeDp: Float,
     color: Int,
@@ -593,9 +598,7 @@ fun CursorOverlay(
     imageHotspotCenter: Boolean = false,
     windowOrigin: Offset = Offset.Zero
 ) {
-    // `position` está em coordenadas da TELA (é o ponto onde o toque é injetado);
-    // o overlay desenha em coordenadas da JANELA, então desconta a origem da janela.
-    val local = position - windowOrigin
+    val cursorPx = with(androidx.compose.ui.platform.LocalDensity.current) { sizeDp.dp.toPx() }
 
     val imageBitmap = remember(imagePath, imageVersion) {
         imagePath?.let { path ->
@@ -604,37 +607,34 @@ fun CursorOverlay(
     }
 
     if (style == CursorStyle.IMAGE && imageBitmap != null) {
+        val shift = if (imageHotspotCenter) cursorPx / 2f else 0f
         Image(
             bitmap = imageBitmap,
             contentDescription = null,
             contentScale = ContentScale.Fit,
             alignment = Alignment.TopStart,
             modifier = Modifier
-                .offset {
-                    val cursorPx = sizeDp.dp.toPx()
-                    IntOffset(
-                        (local.x - if (imageHotspotCenter) cursorPx / 2f else 0f).roundToInt(),
-                        (local.y - if (imageHotspotCenter) cursorPx / 2f else 0f).roundToInt()
-                    )
-                }
                 .size(sizeDp.dp)
-                .alpha(opacity)
+                .graphicsLayer {
+                    val p = position()
+                    translationX = p.x - windowOrigin.x - shift
+                    translationY = p.y - windowOrigin.y - shift
+                    alpha = opacity
+                }
         )
         return
     }
 
+    val shift = if (style != CursorStyle.ARROW) cursorPx / 2f else 0f
     Canvas(
         modifier = Modifier
-            .offset {
-                val cursorPx = sizeDp.dp.toPx()
-                val centered = style != CursorStyle.ARROW
-                IntOffset(
-                    (local.x - if (centered) cursorPx / 2f else 0f).roundToInt(),
-                    (local.y - if (centered) cursorPx / 2f else 0f).roundToInt()
-                )
-            }
             .size(sizeDp.dp)
-            .alpha(opacity)
+            .graphicsLayer {
+                val p = position()
+                translationX = p.x - windowOrigin.x - shift
+                translationY = p.y - windowOrigin.y - shift
+                alpha = opacity
+            }
     ) {
         val w = size.width
         val h = size.height
@@ -692,6 +692,8 @@ fun SettingsLayout(
     cursorHasImage: Boolean = false,
     onNextCursorImage: () -> Unit = {},
     showCursorSection: Boolean = false,
+    performanceMode: Boolean = false,
+    onPerformanceModeChange: (Boolean) -> Unit = {},
     autoTypingMode: Boolean = true,
     onAutoTypingChange: (Boolean) -> Unit = {},
     onTypingModeClick: () -> Unit = {},
@@ -814,6 +816,22 @@ fun SettingsLayout(
                 Text(if (cursorHasImage) "Gerenciar imagens do cursor…" else "Adicionar imagem de cursor…")
             }
         }
+        HorizontalDivider()
+        Text(
+            text = "Desempenho",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)
+        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Modo desempenho", modifier = Modifier.weight(1f))
+            Switch(checked = performanceMode, onCheckedChange = onPerformanceModeChange)
+        }
+        Text(
+            "Menos eventos enviados ao jogo e detector de teclado reduzido (o digitar automático para de funcionar). Use se o FPS cair.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+        )
         HorizontalDivider()
         Text(
             text = "Digitar / Gravar",

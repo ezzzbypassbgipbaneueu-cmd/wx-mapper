@@ -102,6 +102,7 @@ class EventHandler(
             field = value
             wx.autoClickerConfig = value.autoClicker
             wx.setMacros(value.macros)
+            eventInjector.setPerformanceMode(value.performanceMode)
         }
 
     private var cancelableTouchHandler: MultiModeTouchHandler = MixedModeTouchHandler(eventInjector)
@@ -157,9 +158,6 @@ class EventHandler(
             keyToWasdMask(event.keyCode) else 0
         val pointerIdKey = if (wasdBit != 0) KEYCODE_WASD else event.keyCode
         val pointerId = pointerIds[pointerIdKey]
-        if (wasdBit != 0 && event.action == MotionEvent.ACTION_DOWN) {
-            Log.d("WxWasd", "key=${event.keyCode} pointerId=$pointerId (-1 = sem grupo WASD mapeado)")
-        }
         if (pointerId == -1) return false
 
         when (event.action) {
@@ -428,7 +426,6 @@ class EventHandler(
                         s = Offset(cx, cy + r)
                         d = Offset(cx + r, cy)
                     }
-                    Log.d("WxWasd", "WASD center=$center r=${(d.x - center.x)} size=${item.size}")
                     wasdMap[MASK_W] = KeyMap(position = w, center = center)
                     wasdMap[MASK_A] = KeyMap(position = a, center = center)
                     wasdMap[MASK_S] = KeyMap(position = s, center = center)

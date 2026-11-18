@@ -14,6 +14,9 @@ interface EventInjector {
     fun clear()
     fun releasePointer(pointerID: Int)
 
+    /** Modo desempenho: reduz a quantidade de eventos de movimento enviados ao sistema. */
+    fun setPerformanceMode(enabled: Boolean) {}
+
     /** Toque instantâneo (DOWN+UP no mesmo instante). Padrão: dois eventos na fila. */
     fun tap(pointerID: Int, position: Offset) {
         injectPointer(pointerID, position)

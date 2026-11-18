@@ -515,7 +515,8 @@ class FloatingBubbleService : Service() {
                 val itemsContainerOpacity by stateManager.get().overlayOpacity.collectAsState()
                 val isBubbleExpanded by stateManager.get().isBubbleExpanded.collectAsState()
                 val isShootingMode by stateManager.get().isShootingMode.collectAsState()
-                val pointerOffset by stateManager.get().pointerOffset.collectAsState()
+                // State (sem delegate `by`): ler `.value` só no desenho evita recompor a cada movimento do mouse.
+                val pointerState = stateManager.get().pointerOffset.collectAsState()
                 val keysConfig by stateManager.get().keysConfig.collectAsState()
                 val windowOrigin by stateManager.get().windowOrigin.collectAsState()
                 val isTyping by stateManager.get().isTypingMode.collectAsState()
@@ -545,7 +546,7 @@ class FloatingBubbleService : Service() {
                     // Cursor: continua visível no modo gravação (senão você fica sem ver onde clica).
                     if (!isBubbleExpanded && !isShootingMode && !isTyping) {
                         CursorOverlay(
-                            position = pointerOffset,
+                            position = { pointerState.value },
                             style = keysConfig.cursorStyle,
                             sizeDp = keysConfig.cursorSizeDp,
                             color = keysConfig.cursorColor,
@@ -903,6 +904,8 @@ class FloatingBubbleService : Service() {
                         onCursorOpacityChange = { stateManager.get().updateCursorOpacity(it) },
                         cursorHasImage = keysConfig.cursorImagePath != null,
                         onNextCursorImage = { stateManager.get().cycleCursorImage() },
+                        performanceMode = keysConfig.performanceMode,
+                        onPerformanceModeChange = { stateManager.get().updatePerformanceMode(it) },
                         autoTypingMode = keysConfig.autoTypingMode,
                         onAutoTypingChange = { stateManager.get().updateAutoTyping(it) },
                         onTypingModeClick = {

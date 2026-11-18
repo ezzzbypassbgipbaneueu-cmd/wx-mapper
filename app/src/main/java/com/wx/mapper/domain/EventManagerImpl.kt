@@ -81,8 +81,9 @@ class EventManagerImpl : EventManager {
             downTime,
             action,
             activePointerCount,
-            propsArray.sliceArray(0 until activePointerCount),
-            coordsArray.sliceArray(0 until activePointerCount),
+            // Os arrays têm 10 posições; o Android só lê as primeiras `activePointerCount`.
+            propsArray,
+            coordsArray,
             0,
             0,
             1f,

@@ -117,6 +117,7 @@ class FloatingWindowStateManager @Inject constructor(
         val previous = _appConfig.value
         val next = buildEffectiveConfig()
         _appConfig.value = next
+        TypingState.lightMode.value = next.performanceMode
         val previousWithoutCursor = previous.copy(
             cursorStyle = next.cursorStyle,
             cursorSizeDp = next.cursorSizeDp,
@@ -593,6 +594,8 @@ class FloatingWindowStateManager @Inject constructor(
     }
 
     fun updateCursorHotspot(center: Boolean) = updateCursorSettings { copy(cursorImageHotspotCenter = center) }
+
+    fun updatePerformanceMode(enabled: Boolean) = updateCursorSettings { copy(performanceMode = enabled) }
 
     fun updateAutoTyping(enabled: Boolean) = updateCursorSettings { copy(autoTypingMode = enabled) }
 

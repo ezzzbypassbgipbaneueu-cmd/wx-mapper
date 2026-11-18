@@ -60,6 +60,8 @@ data class AppConfig(
     val macroRecordKeyCode: Int = KeyEvent.KEYCODE_F8,
     /** Como o modo gravação esconde o overlay da gravação de tela. */
     val recordingHideMode: RecordingHideMode = RecordingHideMode.BUTTONS_ONLY,
+    /** Modo desempenho: manda menos eventos ao jogo e reduz o detector de acessibilidade. */
+    val performanceMode: Boolean = false,
 ) {
     companion object {
         val Default = AppConfig(
