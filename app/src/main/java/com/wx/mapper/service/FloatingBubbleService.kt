@@ -956,6 +956,13 @@ class FloatingBubbleService : Service() {
                         onNextCursorImage = { stateManager.get().cycleCursorImage() },
                         performanceMode = keysConfig.performanceMode,
                         onPerformanceModeChange = { stateManager.get().updatePerformanceMode(it) },
+                        onOpenProcessManager = {
+                            val intent = Intent(baseContext, com.wx.mapper.ui.ProcessManagerActivity::class.java).apply {
+                                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                            }
+                            baseContext.startActivity(intent)
+                            stateManager.get().onFloatingBubbleClick()
+                        },
                         onOpenAimTrainer = {
                             val intent = Intent(baseContext, com.wx.mapper.ui.AimTrainerActivity::class.java).apply {
                                 flags = Intent.FLAG_ACTIVITY_NEW_TASK

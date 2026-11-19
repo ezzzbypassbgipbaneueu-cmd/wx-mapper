@@ -714,6 +714,7 @@ fun SettingsLayout(
     performanceMode: Boolean = false,
     onPerformanceModeChange: (Boolean) -> Unit = {},
     onOpenAimTrainer: () -> Unit = {},
+    onOpenProcessManager: () -> Unit = {},
     autoTypingMode: Boolean = true,
     onAutoTypingChange: (Boolean) -> Unit = {},
     onTypingModeClick: () -> Unit = {},
@@ -854,6 +855,7 @@ fun SettingsLayout(
         )
         HorizontalDivider()
         TextButton(onClick = onOpenAimTrainer) { Text("Abrir treino de mira") }
+        TextButton(onClick = onOpenProcessManager) { Text("Processos (congelar apps)") }
         HorizontalDivider()
         Text(
             text = "Digitar / Gravar",

@@ -43,6 +43,12 @@
             android:screenOrientation="sensorLandscape"
             android:theme="@style/Theme.WxMapper" />
 
+        <!-- Gerenciador de processos: lista apps em execução e permite parar/congelar. -->
+        <activity
+            android:name=".ui.ProcessManagerActivity"
+            android:exported="false"
+            android:theme="@style/Theme.WxMapper" />
+
         <service
             android:name=".service.FloatingBubbleService"
             android:exported="false"
