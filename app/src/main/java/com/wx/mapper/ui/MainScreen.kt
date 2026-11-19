@@ -1,5 +1,6 @@
 package com.wx.mapper.ui
 
+import android.content.Intent
 import android.graphics.drawable.Drawable
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -113,6 +114,25 @@ private fun summaryText(summary: GameSummary?): String {
     return parts.joinToString(" · ")
 }
 
+/** Atalho para uma ferramenta do WX (treino de mira, processos). O fundo da tela é sempre escuro. */
+@Composable
+private fun ToolCard(title: String, subtitle: String, onClick: () -> Unit) {
+    GlassCard(modifier = Modifier.clip(RoundedCornerShape(20.dp)).clickable(onClick = onClick)) {
+        Text(
+            title,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = Color.White
+        )
+        Spacer(Modifier.size(2.dp))
+        Text(
+            subtitle,
+            style = MaterialTheme.typography.bodySmall,
+            color = Color.White.copy(alpha = 0.65f)
+        )
+    }
+}
+
 /** Cartão de um jogo: ícone, nome, resumo do perfil, botão Jogar e menu. */
 @Composable
 private fun GameCard(
@@ -195,6 +215,7 @@ fun MainScreen(
     onOpenProfile: (String) -> Unit,
     onPackageIconClick: (String) -> Unit
 ) {
+    val appContext = LocalContext.current
     val packages by viewModel.addedPackages.collectAsState()
     val summaries by viewModel.summaries.collectAsState()
     val connectedDevices by viewModel.connectedDevices.collectAsState()
@@ -266,6 +287,29 @@ fun MainScreen(
                         }
                     }
                 }
+            }
+            item {
+                Text(
+                    "Ferramentas",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color.White,
+                    modifier = Modifier.padding(top = 4.dp)
+                )
+            }
+            item {
+                ToolCard(
+                    title = "Treino de mira",
+                    subtitle = "Bolinha em movimento para treinar com o cursor do WX, mouse ou toque.",
+                    onClick = { appContext.startActivity(Intent(appContext, AimTrainerActivity::class.java)) }
+                )
+            }
+            item {
+                ToolCard(
+                    title = "Processos",
+                    subtitle = "Veja os apps em execução e pare ou congele os que atrapalham o jogo.",
+                    onClick = { appContext.startActivity(Intent(appContext, ProcessManagerActivity::class.java)) }
+                )
             }
             item {
                 Text(

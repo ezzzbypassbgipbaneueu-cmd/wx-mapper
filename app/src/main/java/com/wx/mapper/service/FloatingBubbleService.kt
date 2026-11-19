@@ -963,13 +963,6 @@ class FloatingBubbleService : Service() {
                             baseContext.startActivity(intent)
                             stateManager.get().onFloatingBubbleClick()
                         },
-                        onOpenAimTrainer = {
-                            val intent = Intent(baseContext, com.wx.mapper.ui.AimTrainerActivity::class.java).apply {
-                                flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                            }
-                            baseContext.startActivity(intent)
-                            stateManager.get().onFloatingBubbleClick()
-                        },
                         autoTypingMode = keysConfig.autoTypingMode,
                         onAutoTypingChange = { stateManager.get().updateAutoTyping(it) },
                         onTypingModeClick = {

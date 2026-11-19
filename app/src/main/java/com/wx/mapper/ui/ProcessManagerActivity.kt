@@ -2,17 +2,20 @@ package com.wx.mapper.ui
 
 import android.app.ActivityManager
 import android.content.Context
+import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.os.Bundle
+import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
@@ -20,6 +23,7 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -39,6 +43,8 @@ import com.wx.mapper.data.external.ShizukuShell
 import com.wx.mapper.service.TypingState
 import com.wx.mapper.ui.theme.WxTheme
 import com.wx.mapper.util.FreezeStore
+import com.wx.mapper.util.PsParser
+import com.wx.mapper.util.PsRow
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -65,15 +71,7 @@ class ProcessManagerActivity : ComponentActivity() {
     }
 }
 
-private data class RunningProcess(
-    val pid: Int,
-    val uid: String,
-    val name: String,
-    val label: String,
-    val packageName: String?,
-    val rssMb: Int,
-    val manageable: Boolean
-)
+private data class RunningApp(val pkg: String, val label: String, val rssMb: Int, val processes: Int)
 
 private fun loadFrozen(ctx: Context): Set<String> = FreezeStore.frozen(ctx)
 
@@ -86,87 +84,71 @@ private fun appLabel(ctx: Context, pkg: String): String = try {
     pkg
 }
 
+private data class ListResult(val apps: List<RunningApp>, val problem: String?)
+
+/** Do mais completo ao mais simples: cada aparelho/Android aceita um formato diferente do `ps`. */
+private val PS_COMMANDS = listOf(
+    "ps -A -o USER:16,PID,RSS,NAME:200",
+    "ps -A -o USER,PID,RSS,NAME",
+    "ps -A",
+    "ps"
+)
+
 /**
- * Lista processos do Android via Shizuku.
- * Exclui somente tarefas do kernel (nomes entre colchetes, como [kworker/...]).
- * Processos do sistema/serviços são exibidos, mas ficam somente para leitura.
+ * Lê `ps` com o Shizuku e agrupa por app. Devolve só apps que podem ser parados/congelados.
+ * Se algo der errado, [ListResult.problem] explica o quê (aparece na tela).
  */
-private fun listRunningProcesses(ctx: Context, frozen: Set<String>): List<RunningProcess> {
-    val result = ShizukuShell.exec("ps -A -o USER,PID,PPID,RSS,NAME")
-    if (result.out.isBlank()) return emptyList()
+private fun listRunningApps(ctx: Context, frozen: Set<String>): ListResult {
+    var rows: List<PsRow> = emptyList()
+    var lastProblem = ""
+    for (cmd in PS_COMMANDS) {
+        val r = ShizukuShell.exec(cmd)
+        val parsed = PsParser.parse(r.out)
+        if (parsed.isNotEmpty()) {
+            rows = parsed
+            break
+        }
+        lastProblem = if (!r.ok) {
+            "\"$cmd\" falhou (código ${r.exitCode}): ${r.err.trim().take(160)}"
+        } else {
+            "\"$cmd\" rodou, mas a saída não tinha apps: ${r.out.trim().take(120)}"
+        }
+    }
+    if (rows.isEmpty()) {
+        return ListResult(emptyList(), lastProblem.ifBlank { "O comando ps não devolveu nada." })
+    }
 
     val blocked = FreezeStore.protectedPackages(ctx)
     val pm = ctx.packageManager
-    val rows = mutableListOf<RunningProcess>()
 
-    result.out.lineSequence().drop(1).forEach { line ->
-        val parts = line.trim().split(Regex("\\s+"), limit = 5)
-        if (parts.size < 5) return@forEach
-
-        val user = parts[0]
-        val pid = parts[1].toIntOrNull() ?: return@forEach
-        val parentPid = parts[2].toIntOrNull() ?: -1
-        val rssKb = parts[3].toIntOrNull() ?: 0
-        val processName = parts[4].trim()
-        if (processName.isBlank()) return@forEach
-
-        // Tarefas do kernel: nome entre colchetes ou processo filho do kthreadd (PID 2).
-        if ((processName.startsWith("[") && processName.endsWith("]")) || parentPid == 2) return@forEach
-
-        val baseName = processName.substringBefore(':')
-        val directPackage = if (ShizukuShell.isSafePackageName(baseName)) baseName else null
-        val uid = when {
-            user.matches(Regex("^u\\d+_a\\d+$")) -> {
-                val match = Regex("^u(\\d+)_a(\\d+)$").matchEntire(user)
-                if (match != null) {
-                    (match.groupValues[1].toInt() * 100000 + 10000 +
-                        match.groupValues[2].toInt()).toString()
-                } else user
-            }
-            else -> user
-        }
-
-        val packageName = directPackage?.takeIf {
-            try { pm.getApplicationInfo(it, 0); true } catch (_: Exception) { false }
-        } ?: uid.toIntOrNull()?.let { numericUid ->
-            pm.getPackagesForUid(numericUid)?.firstOrNull { pkg ->
-                processName == pkg || processName.startsWith("$pkg:")
-            }
-        }
-
-        val info = packageName?.let {
-            try { pm.getApplicationInfo(it, 0) } catch (_: Exception) { null }
-        }
-        val label = if (info != null) {
-            pm.getApplicationLabel(info).toString()
-        } else {
-            processName
-        }
-
-        // Só apps comuns/atualizados podem ser selecionados para as ações existentes.
-        // Daemons e componentes essenciais continuam visíveis, mas sem checkbox.
-        val isSystem = info?.flags?.and(ApplicationInfo.FLAG_SYSTEM) != 0
-        val updatedSystem = info?.flags?.and(ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
-        val manageable = packageName != null &&
-            info != null &&
-            (!isSystem || updatedSystem) &&
-            packageName !in blocked &&
-            packageName !in frozen &&
-            ShizukuShell.isSafePackageName(packageName)
-
-        rows += RunningProcess(
-            pid = pid,
-            uid = user,
-            name = processName,
-            label = label,
-            packageName = packageName,
-            rssMb = rssKb / 1024,
-            manageable = manageable
-        )
+    val rssByPkg = HashMap<String, Int>()
+    val countByPkg = HashMap<String, Int>()
+    rows.forEach { row ->
+        val pkg = row.name.substringBefore(':')
+        if (!ShizukuShell.isSafePackageName(pkg) || pkg in blocked || pkg in frozen) return@forEach
+        rssByPkg[pkg] = (rssByPkg[pkg] ?: 0) + row.rssKb
+        countByPkg[pkg] = (countByPkg[pkg] ?: 0) + 1
     }
 
-    return rows.sortedWith(compareByDescending<RunningProcess> { it.rssMb }.thenBy { it.name })
+    val apps = rssByPkg.mapNotNull { (pkg, rssKb) ->
+        val info = try {
+            pm.getApplicationInfo(pkg, 0)
+        } catch (_: Exception) {
+            return@mapNotNull null
+        }
+        val isSystem = info.flags and ApplicationInfo.FLAG_SYSTEM != 0
+        val updatedSystem = info.flags and ApplicationInfo.FLAG_UPDATED_SYSTEM_APP != 0
+        if (isSystem && !updatedSystem) return@mapNotNull null
+        RunningApp(pkg, pm.getApplicationLabel(info).toString(), rssKb / 1024, countByPkg[pkg] ?: 1)
+    }.sortedByDescending { it.rssMb }
+
+    val problem = if (apps.isEmpty()) {
+        "Li ${rows.size} processos de apps, mas nenhum pode ser parado/congelado " +
+            "(só sobraram apps do sistema, protegidos ou já congelados)."
+    } else null
+    return ListResult(apps, problem)
 }
+
 private fun freeRamText(ctx: Context): String {
     val info = ActivityManager.MemoryInfo()
     (ctx.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager).getMemoryInfo(info)
@@ -178,13 +160,14 @@ private fun ProcessManagerScreen() {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    var processes by remember { mutableStateOf<List<RunningProcess>>(emptyList()) }
+    var apps by remember { mutableStateOf<List<RunningApp>>(emptyList()) }
     var frozen by remember { mutableStateOf(loadFrozen(ctx)) }
     var selected by remember { mutableStateOf<Set<String>>(emptySet()) }
     var ramText by remember { mutableStateOf(freeRamText(ctx)) }
     var message by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var available by remember { mutableStateOf(true) }
+    var problem by remember { mutableStateOf<String?>(null) }
     var autoEnabled by remember { mutableStateOf(FreezeStore.autoEnabled(ctx)) }
     var autoList by remember { mutableStateOf(FreezeStore.autoList(ctx)) }
     val detectorOn by TypingState.serviceConnected.collectAsState()
@@ -195,9 +178,10 @@ private fun ProcessManagerScreen() {
             val ok = withContext(Dispatchers.IO) { ShizukuShell.isAvailable() }
             available = ok
             if (ok) {
-                val list = withContext(Dispatchers.IO) { listRunningProcesses(ctx, loadFrozen(ctx)) }
-                processes = list
-                selected = selected.filter { pkg -> list.any { it.packageName == pkg && it.manageable } }.toSet()
+                val res = withContext(Dispatchers.IO) { listRunningApps(ctx, loadFrozen(ctx)) }
+                apps = res.apps
+                problem = res.problem
+                selected = selected.filter { pkg -> res.apps.any { it.pkg == pkg } }.toSet()
             }
             ramText = freeRamText(ctx)
             busy = false
@@ -221,10 +205,17 @@ private fun ProcessManagerScreen() {
 
     LaunchedEffect(Unit) { refresh() }
 
+    // Surface define a cor do texto (sem ela o texto fica preto sobre fundo escuro = tela "em branco").
+    Surface(
+        modifier = Modifier.fillMaxSize(),
+        color = MaterialTheme.colorScheme.background,
+        contentColor = MaterialTheme.colorScheme.onBackground
+    ) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
+            .statusBarsPadding()
+            .navigationBarsPadding()
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
@@ -307,6 +298,13 @@ private fun ProcessManagerScreen() {
             }
         ) { Text("Adicionar à lista automática") }
         if (message.isNotBlank()) Text(message, style = MaterialTheme.typography.bodySmall)
+        problem?.let {
+            Text(
+                "Não consegui listar os apps: $it",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error
+            )
+        }
 
         LazyColumn(modifier = Modifier.fillMaxSize()) {
             if (autoList.isNotEmpty()) {
@@ -391,42 +389,35 @@ private fun ProcessManagerScreen() {
 
             item {
                 Text(
-                    if (busy && processes.isEmpty()) "Carregando…" else "Processos em execução (${processes.size})",
+                    if (busy && apps.isEmpty()) "Carregando…" else "Em execução (${apps.size})",
                     style = MaterialTheme.typography.titleSmall,
                     modifier = Modifier.padding(bottom = 4.dp)
                 )
             }
-            items(processes, key = { it.pid }) { process ->
+            items(apps, key = { it.pkg }) { app ->
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(vertical = 3.dp),
+                        .padding(vertical = 2.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    if (process.manageable && process.packageName != null) {
-                        Checkbox(
-                            checked = process.packageName in selected,
-                            onCheckedChange = { checked ->
-                                selected = if (checked) selected + process.packageName
-                                    else selected - process.packageName
-                            }
-                        )
-                    } else {
-                        Text("•", modifier = Modifier.padding(horizontal = 12.dp))
-                    }
+                    Checkbox(
+                        checked = app.pkg in selected,
+                        onCheckedChange = { checked ->
+                            selected = if (checked) selected + app.pkg else selected - app.pkg
+                        }
+                    )
                     Column(modifier = Modifier.weight(1f)) {
-                        Text(process.label, maxLines = 1)
+                        Text(app.label, maxLines = 1)
                         Text(
-                            "${process.name} • PID ${process.pid} • UID ${process.uid}" +
-                                (if (process.manageable) "" else " • somente leitura"),
+                            "${app.pkg} • ${app.processes} processo(s)",
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f),
-                            maxLines = 2
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                            maxLines = 1
                         )
                     }
-                    Text("${process.rssMb} MB", style = MaterialTheme.typography.labelMedium)
+                    Text("${app.rssMb} MB", style = MaterialTheme.typography.labelMedium)
                 }
-                HorizontalDivider()
             }
             item {
                 Text(
@@ -438,5 +429,6 @@ private fun ProcessManagerScreen() {
                 )
             }
         }
+    }
     }
 }
