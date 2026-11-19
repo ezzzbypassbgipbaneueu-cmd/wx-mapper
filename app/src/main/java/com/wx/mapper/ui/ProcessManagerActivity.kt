@@ -2,10 +2,8 @@ package com.wx.mapper.ui
 
 import android.app.ActivityManager
 import android.content.Context
-import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.os.Bundle
-import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
@@ -47,13 +45,14 @@ import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
 
 /**
- * Gerenciador de processos: lista processos de apps e do sistema (do maior uso de RAM para o menor).
- * Apenas apps comuns instalados podem ser selecionados para PARAR ou CONGELAR.
+ * Gerenciador de processos: lista os apps em execução (do maior uso de RAM para o menor) e deixa
+ * PARAR ou CONGELAR os que você escolher, para sobrar CPU/RAM para o jogo.
  *
  *  - Parar    = `am force-stop` (o app pode reabrir sozinho depois).
  *  - Congelar = `pm suspend` (o app não roda nem em segundo plano até você DESCONGELAR). Reversível.
  *
- * Processos do sistema e serviços auxiliares também aparecem, mas ficam protegidos contra congelamento.
+ * Só aparecem apps instalados (e atualizações de apps do sistema). Launcher, teclado, SystemUI,
+ * Serviços do Google, Shizuku, serviços de acessibilidade e o próprio WX nunca aparecem.
  */
 class ProcessManagerActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -66,13 +65,14 @@ class ProcessManagerActivity : ComponentActivity() {
     }
 }
 
-private data class RunningApp(
-    val id: String,
-    val pkg: String?,
+private data class RunningProcess(
+    val pid: Int,
+    val uid: String,
+    val name: String,
     val label: String,
+    val packageName: String?,
     val rssMb: Int,
-    val processes: Int,
-    val canFreeze: Boolean
+    val manageable: Boolean
 )
 
 private fun loadFrozen(ctx: Context): Set<String> = FreezeStore.frozen(ctx)
@@ -87,77 +87,86 @@ private fun appLabel(ctx: Context, pkg: String): String = try {
 }
 
 /**
- * Lê TODOS os processos visíveis ao Shizuku. Processos que não correspondem a um
- * pacote instalado também aparecem, mas ficam somente para visualização.
- * O congelamento continua sendo feito por pacote (pm suspend), nunca por PID.
+ * Lista processos do Android via Shizuku.
+ * Exclui somente tarefas do kernel (nomes entre colchetes, como [kworker/...]).
+ * Processos do sistema/serviços são exibidos, mas ficam somente para leitura.
  */
-private fun listRunningApps(ctx: Context, frozen: Set<String>): List<RunningApp> {
-    val result = ShizukuShell.exec("ps -A -o USER,PID,RSS,NAME")
-    if (!result.ok && result.out.isBlank()) return emptyList()
+private fun listRunningProcesses(ctx: Context, frozen: Set<String>): List<RunningProcess> {
+    val result = ShizukuShell.exec("ps -A -o USER,PID,PPID,RSS,NAME")
+    if (result.out.isBlank()) return emptyList()
 
     val blocked = FreezeStore.protectedPackages(ctx)
     val pm = ctx.packageManager
-    data class Aggregate(
-        val pkg: String?,
-        val label: String,
-        var rssKb: Long,
-        var count: Int,
-        val canFreeze: Boolean
-    )
-    val grouped = LinkedHashMap<String, Aggregate>()
+    val rows = mutableListOf<RunningProcess>()
 
     result.out.lineSequence().drop(1).forEach { line ->
-        // NAME fica no último campo e pode conter ':' (processos auxiliares do app).
-        val parts = line.trim().split(Regex("\\s+"), limit = 4)
-        if (parts.size < 4) return@forEach
-        val rssKb = parts[2].toLongOrNull() ?: 0L
-        val processName = parts[3].trim()
+        val parts = line.trim().split(Regex("\\s+"), limit = 5)
+        if (parts.size < 5) return@forEach
+
+        val user = parts[0]
+        val pid = parts[1].toIntOrNull() ?: return@forEach
+        val parentPid = parts[2].toIntOrNull() ?: -1
+        val rssKb = parts[3].toIntOrNull() ?: 0
+        val processName = parts[4].trim()
         if (processName.isBlank()) return@forEach
 
-        val possiblePkg = processName.substringBefore(':')
-        val pkg = possiblePkg.takeIf { ShizukuShell.isSafePackageName(it) }
-        val appInfo = if (pkg != null) try {
-            pm.getApplicationInfo(pkg, 0)
-        } catch (_: Exception) {
-            null
-        } else null
+        // Tarefas do kernel: nome entre colchetes ou processo filho do kthreadd (PID 2).
+        if ((processName.startsWith("[") && processName.endsWith("]")) || parentPid == 2) return@forEach
 
-        // Só pacotes instalados podem ser congelados. Apps de sistema, pacotes
-        // protegidos e itens já congelados continuam visíveis, mas não selecionáveis.
-        val installedPkg = if (appInfo != null) pkg else null
-        if (installedPkg != null && installedPkg in frozen) return@forEach
+        val baseName = processName.substringBefore(':')
+        val directPackage = if (ShizukuShell.isSafePackageName(baseName)) baseName else null
+        val uid = when {
+            user.matches(Regex("^u\\d+_a\\d+$")) -> {
+                val match = Regex("^u(\\d+)_a(\\d+)$").matchEntire(user)
+                if (match != null) {
+                    (match.groupValues[1].toInt() * 100000 + 10000 +
+                        match.groupValues[2].toInt()).toString()
+                } else user
+            }
+            else -> user
+        }
 
-        val label = if (appInfo != null) {
-            pm.getApplicationLabel(appInfo).toString()
+        val packageName = directPackage?.takeIf {
+            try { pm.getApplicationInfo(it, 0); true } catch (_: Exception) { false }
+        } ?: uid.toIntOrNull()?.let { numericUid ->
+            pm.getPackagesForUid(numericUid)?.firstOrNull { pkg ->
+                processName == pkg || processName.startsWith("$pkg:")
+            }
+        }
+
+        val info = packageName?.let {
+            try { pm.getApplicationInfo(it, 0) } catch (_: Exception) { null }
+        }
+        val label = if (info != null) {
+            pm.getApplicationLabel(info).toString()
         } else {
             processName
         }
-        val isSystem = appInfo?.let {
-            it.flags and ApplicationInfo.FLAG_SYSTEM != 0
-        } ?: true
-        val canFreeze = installedPkg != null && !isSystem && installedPkg !in blocked
-        val key = installedPkg ?: "#process:$processName"
-        val current = grouped[key]
-        if (current == null) {
-            grouped[key] = Aggregate(installedPkg, label, rssKb, 1, canFreeze)
-        } else {
-            current.rssKb += rssKb
-            current.count += 1
-        }
+
+        // Só apps comuns/atualizados podem ser selecionados para as ações existentes.
+        // Daemons e componentes essenciais continuam visíveis, mas sem checkbox.
+        val isSystem = info?.flags?.and(ApplicationInfo.FLAG_SYSTEM) != 0
+        val updatedSystem = info?.flags?.and(ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
+        val manageable = packageName != null &&
+            info != null &&
+            (!isSystem || updatedSystem) &&
+            packageName !in blocked &&
+            packageName !in frozen &&
+            ShizukuShell.isSafePackageName(packageName)
+
+        rows += RunningProcess(
+            pid = pid,
+            uid = user,
+            name = processName,
+            label = label,
+            packageName = packageName,
+            rssMb = rssKb / 1024,
+            manageable = manageable
+        )
     }
 
-    return grouped.map { (key, item) ->
-        RunningApp(
-            id = key,
-            pkg = item.pkg,
-            label = item.label,
-            rssMb = (item.rssKb / 1024L).coerceAtMost(Int.MAX_VALUE.toLong()).toInt(),
-            processes = item.count,
-            canFreeze = item.canFreeze
-        )
-    }.sortedWith(compareByDescending<RunningApp> { it.rssMb }.thenBy { it.label.lowercase() })
+    return rows.sortedWith(compareByDescending<RunningProcess> { it.rssMb }.thenBy { it.name })
 }
-
 private fun freeRamText(ctx: Context): String {
     val info = ActivityManager.MemoryInfo()
     (ctx.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager).getMemoryInfo(info)
@@ -169,7 +178,7 @@ private fun ProcessManagerScreen() {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    var apps by remember { mutableStateOf<List<RunningApp>>(emptyList()) }
+    var processes by remember { mutableStateOf<List<RunningProcess>>(emptyList()) }
     var frozen by remember { mutableStateOf(loadFrozen(ctx)) }
     var selected by remember { mutableStateOf<Set<String>>(emptySet()) }
     var ramText by remember { mutableStateOf(freeRamText(ctx)) }
@@ -186,9 +195,9 @@ private fun ProcessManagerScreen() {
             val ok = withContext(Dispatchers.IO) { ShizukuShell.isAvailable() }
             available = ok
             if (ok) {
-                val list = withContext(Dispatchers.IO) { listRunningApps(ctx, loadFrozen(ctx)) }
-                apps = list
-                selected = selected.filter { pkg -> list.any { it.pkg == pkg } }.toSet()
+                val list = withContext(Dispatchers.IO) { listRunningProcesses(ctx, loadFrozen(ctx)) }
+                processes = list
+                selected = selected.filter { pkg -> list.any { it.packageName == pkg && it.manageable } }.toSet()
             }
             ramText = freeRamText(ctx)
             busy = false
@@ -382,38 +391,42 @@ private fun ProcessManagerScreen() {
 
             item {
                 Text(
-                    if (busy && apps.isEmpty()) "Carregando…" else "Em execução (${apps.size})",
+                    if (busy && processes.isEmpty()) "Carregando…" else "Processos em execução (${processes.size})",
                     style = MaterialTheme.typography.titleSmall,
                     modifier = Modifier.padding(bottom = 4.dp)
                 )
             }
-            items(apps, key = { it.id }) { app ->
+            items(processes, key = { it.pid }) { process ->
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(vertical = 2.dp),
+                        .padding(vertical = 3.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Checkbox(
-                        checked = app.pkg != null && app.pkg in selected,
-                        enabled = app.canFreeze && app.pkg != null && !busy,
-                        onCheckedChange = { checked ->
-                            val pkg = app.pkg ?: return@Checkbox
-                            selected = if (checked) selected + pkg else selected - pkg
-                        }
-                    )
+                    if (process.manageable && process.packageName != null) {
+                        Checkbox(
+                            checked = process.packageName in selected,
+                            onCheckedChange = { checked ->
+                                selected = if (checked) selected + process.packageName
+                                    else selected - process.packageName
+                            }
+                        )
+                    } else {
+                        Text("•", modifier = Modifier.padding(horizontal = 12.dp))
+                    }
                     Column(modifier = Modifier.weight(1f)) {
-                        Text(app.label, maxLines = 1)
+                        Text(process.label, maxLines = 1)
                         Text(
-                            "${app.pkg ?: app.id.removePrefix("#process:")} • ${app.processes} processo(s)" +
-                                if (app.canFreeze) "" else " • somente visualização",
+                            "${process.name} • PID ${process.pid} • UID ${process.uid}" +
+                                (if (process.manageable) "" else " • somente leitura"),
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                            maxLines = 1
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f),
+                            maxLines = 2
                         )
                     }
-                    Text("${app.rssMb} MB", style = MaterialTheme.typography.labelMedium)
+                    Text("${process.rssMb} MB", style = MaterialTheme.typography.labelMedium)
                 }
+                HorizontalDivider()
             }
             item {
                 Text(
