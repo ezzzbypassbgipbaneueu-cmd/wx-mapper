@@ -1,8 +1,9 @@
 package com.wx.mapper.data.external
 
 import android.content.pm.PackageManager
+import android.os.ParcelFileDescriptor
+import moe.shizuku.server.IShizukuService
 import rikka.shizuku.Shizuku
-import java.util.concurrent.TimeUnit
 import kotlin.concurrent.thread
 
 data class ShellResult(val exitCode: Int, val out: String, val err: String) {
@@ -11,18 +12,10 @@ data class ShellResult(val exitCode: Int, val out: String, val err: String) {
 
 /**
  * Roda comandos de shell com a permissão do Shizuku (mesmo nível do ADB).
- * Usa `Shizuku.newProcess` por reflexão: ele é privado na API 13, mas continua funcionando.
+ * Mesmo modelo do Hail: pede o processo direto ao serviço do Shizuku (IShizukuService),
+ * escreve o comando no stdin do `sh` e lê stdout/stderr.
  */
 object ShizukuShell {
-
-    private val newProcessMethod by lazy {
-        Shizuku::class.java.getDeclaredMethod(
-            "newProcess",
-            Array<String>::class.java,
-            Array<String>::class.java,
-            String::class.java
-        ).apply { isAccessible = true }
-    }
 
     /** true se o Shizuku está rodando e o WX tem permissão. */
     fun isAvailable(): Boolean = try {
@@ -37,22 +30,59 @@ object ShizukuShell {
 
     fun exec(command: String, timeoutSec: Long = 15): ShellResult {
         return try {
-            val process = newProcessMethod.invoke(null, arrayOf("sh", "-c", command), null, null) as Process
+            val process = IShizukuService.Stub.asInterface(Shizuku.getBinder())
+                .newProcess(arrayOf("sh"), null, null)
+
+            // Fechar o stdin manda o EOF: o sh executa o comando e termina.
+            ParcelFileDescriptor.AutoCloseOutputStream(process.outputStream).use {
+                it.write((command + "\n").toByteArray())
+            }
+
             val out = StringBuilder()
             val err = StringBuilder()
             val outThread = thread(isDaemon = true) {
-                process.inputStream.bufferedReader().forEachLine { out.appendLine(it) }
+                try {
+                    ParcelFileDescriptor.AutoCloseInputStream(process.inputStream)
+                        .bufferedReader().use { out.append(it.readText()) }
+                } catch (_: Throwable) {
+                }
             }
             val errThread = thread(isDaemon = true) {
-                process.errorStream.bufferedReader().forEachLine { err.appendLine(it) }
+                try {
+                    ParcelFileDescriptor.AutoCloseInputStream(process.errorStream)
+                        .bufferedReader().use { err.append(it.readText()) }
+                } catch (_: Throwable) {
+                }
             }
-            val finished = process.waitFor(timeoutSec, TimeUnit.SECONDS)
-            if (!finished) process.destroy()
+
+            var code = -1
+            val waiter = thread(isDaemon = true) {
+                code = try {
+                    process.waitFor()
+                } catch (_: Throwable) {
+                    -1
+                }
+            }
+            waiter.join(timeoutSec * 1000)
+            val finished = !waiter.isAlive
+            if (!finished) {
+                try {
+                    process.destroy()
+                } catch (_: Throwable) {
+                }
+            }
             outThread.join(1000)
             errThread.join(1000)
-            ShellResult(if (finished) process.exitValue() else -1, out.toString(), err.toString())
+            if (finished) {
+                try {
+                    process.destroy()
+                } catch (_: Throwable) {
+                }
+            }
+            val errText = if (finished) err.toString() else "tempo esgotado (${timeoutSec}s)"
+            ShellResult(if (finished) code else -1, out.toString(), errText)
         } catch (t: Throwable) {
-            ShellResult(-1, "", t.message ?: t.javaClass.simpleName)
+            ShellResult(-1, "", "${t.javaClass.simpleName}: ${t.message}")
         }
     }
 }
