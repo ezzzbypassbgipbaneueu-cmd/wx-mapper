@@ -22,10 +22,12 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -36,7 +38,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.wx.mapper.data.external.ShizukuShell
+import com.wx.mapper.service.TypingState
 import com.wx.mapper.ui.theme.WxTheme
+import com.wx.mapper.util.FreezeStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -65,15 +69,9 @@ class ProcessManagerActivity : ComponentActivity() {
 
 private data class RunningApp(val pkg: String, val label: String, val rssMb: Int, val processes: Int)
 
-private const val PREFS = "wx_frozen"
-private const val KEY_FROZEN = "frozen"
+private fun loadFrozen(ctx: Context): Set<String> = FreezeStore.frozen(ctx)
 
-private fun loadFrozen(ctx: Context): Set<String> =
-    ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getStringSet(KEY_FROZEN, emptySet()) ?: emptySet()
-
-private fun saveFrozen(ctx: Context, set: Set<String>) {
-    ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putStringSet(KEY_FROZEN, set.toSet()).apply()
-}
+private fun saveFrozen(ctx: Context, set: Set<String>) = FreezeStore.setFrozen(ctx, set)
 
 private fun appLabel(ctx: Context, pkg: String): String = try {
     val pm = ctx.packageManager
@@ -82,39 +80,11 @@ private fun appLabel(ctx: Context, pkg: String): String = try {
     pkg
 }
 
-/** Pacotes que NUNCA devem aparecer na lista (quebrariam o aparelho ou o próprio WX). */
-private fun protectedPackages(ctx: Context): Set<String> {
-    val set = mutableSetOf(
-        ctx.packageName,
-        "android",
-        "com.android.systemui",
-        "com.android.settings",
-        "com.android.phone",
-        "com.android.server.telecom",
-        "com.android.providers.media",
-        "moe.shizuku.privileged.api",
-        "com.google.android.gms",
-        "com.google.android.gsf",
-        "com.google.android.webview",
-        "com.android.webview"
-    )
-    try {
-        val home = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
-        ctx.packageManager.resolveActivity(home, 0)?.activityInfo?.packageName?.let { set += it }
-        Settings.Secure.getString(ctx.contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD)
-            ?.substringBefore('/')?.let { set += it }
-        Settings.Secure.getString(ctx.contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES)
-            ?.split(':')?.forEach { service -> set += service.substringBefore('/') }
-    } catch (_: Exception) {
-    }
-    return set
-}
-
 /** Lê `ps` com o Shizuku e agrupa por app. Devolve só apps que podem ser parados/congelados. */
 private fun listRunningApps(ctx: Context, frozen: Set<String>): List<RunningApp> {
     val result = ShizukuShell.exec("ps -A -o USER,PID,RSS,NAME")
     if (!result.ok && result.out.isBlank()) return emptyList()
-    val blocked = protectedPackages(ctx)
+    val blocked = FreezeStore.protectedPackages(ctx)
     val pm = ctx.packageManager
     val userRow = Regex("^u\\d+_a\\d+$")
 
@@ -161,6 +131,9 @@ private fun ProcessManagerScreen() {
     var message by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var available by remember { mutableStateOf(true) }
+    var autoEnabled by remember { mutableStateOf(FreezeStore.autoEnabled(ctx)) }
+    var autoList by remember { mutableStateOf(FreezeStore.autoList(ctx)) }
+    val detectorOn by TypingState.serviceConnected.collectAsState()
 
     fun refresh() {
         scope.launch {
@@ -213,6 +186,31 @@ private fun ProcessManagerScreen() {
             return@Column
         }
 
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Congelar sozinho ao abrir o jogo", style = MaterialTheme.typography.titleSmall)
+                Text(
+                    if (autoList.isEmpty()) "Lista automática vazia. Marque apps abaixo e toque em \"Adicionar à lista automática\"."
+                    else "Lista automática: ${autoList.size} app(s). Congela ao abrir um jogo do WX e descongela 8 s depois que você sai.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                )
+            }
+            Switch(
+                checked = autoEnabled,
+                onCheckedChange = {
+                    autoEnabled = it
+                    FreezeStore.setAutoEnabled(ctx, it)
+                }
+            )
+        }
+        if (autoEnabled && !detectorOn) {
+            Text(
+                "Ative o serviço de acessibilidade do WX para ele detectar quando o jogo abre.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error
+            )
+        }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(onClick = { refresh() }, enabled = !busy) { Text("Atualizar") }
             OutlinedButton(
@@ -244,9 +242,46 @@ private fun ProcessManagerScreen() {
                 }
             ) { Text("Congelar") }
         }
+        OutlinedButton(
+            enabled = !busy && selected.isNotEmpty(),
+            onClick = {
+                val merged = FreezeStore.autoList(ctx) + selected
+                FreezeStore.setAutoList(ctx, merged)
+                autoList = merged
+                message = "${selected.size} app(s) adicionado(s) à lista automática."
+                selected = emptySet()
+            }
+        ) { Text("Adicionar à lista automática") }
         if (message.isNotBlank()) Text(message, style = MaterialTheme.typography.bodySmall)
 
         LazyColumn(modifier = Modifier.fillMaxSize()) {
+            if (autoList.isNotEmpty()) {
+                item {
+                    Text(
+                        "Lista automática (${autoList.size})",
+                        style = MaterialTheme.typography.titleSmall,
+                        modifier = Modifier.padding(bottom = 4.dp)
+                    )
+                }
+                items(autoList.toList(), key = { "a_$it" }) { pkg ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(appLabel(ctx, pkg), modifier = Modifier.weight(1f), maxLines = 1)
+                        TextButton(
+                            onClick = {
+                                val rest = FreezeStore.autoList(ctx) - pkg
+                                FreezeStore.setAutoList(ctx, rest)
+                                autoList = rest
+                            }
+                        ) { Text("Remover") }
+                    }
+                }
+                item { HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp)) }
+            }
             if (frozen.isNotEmpty()) {
                 item {
                     Row(

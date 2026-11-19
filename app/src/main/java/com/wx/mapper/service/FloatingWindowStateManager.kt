@@ -164,6 +164,9 @@ class FloatingWindowStateManager @Inject constructor(
 
     val isShootingMode = eventHandler.shootingModeFlow
 
+    // Declarado ANTES do init: o init já inicia o observador que usa isso.
+    private val autoFreeze = AutoFreezeManager(context, scope)
+
     init {
         lastScreenW = screenWidthPx
         lastScreenH = screenHeightPx
@@ -238,8 +241,11 @@ class FloatingWindowStateManager @Inject constructor(
     private fun observeForegroundGame() {
         scope.launch {
             TypingState.foregroundPackage.collect { pkg ->
-                if (pkg == null || pkg == _activePackage.value || _isBubbleExpanded.value) return@collect
+                if (pkg == null) return@collect
                 val games = dataStoreManager.getList(DataStoreManager.ADDED_PACKAGES).first()
+                // Congelar/descongelar apps automaticamente conforme o jogo entra/sai da frente.
+                autoFreeze.onForeground(pkg, pkg in games)
+                if (pkg == _activePackage.value || _isBubbleExpanded.value) return@collect
                 if (pkg in games) switchGame(pkg, announce = true)
             }
         }
@@ -267,7 +273,10 @@ class FloatingWindowStateManager @Inject constructor(
     }
 
     /** Carrega o keymap + perfil do jogo. Chamado ao abrir o jogo pelo app ou ao detectar a troca. */
-    fun loadButtonsConfig(packageName: String) = switchGame(packageName, announce = false)
+    fun loadButtonsConfig(packageName: String) {
+        autoFreeze.onForeground(packageName, true)
+        switchGame(packageName, announce = false)
+    }
 
     fun switchGame(packageName: String, announce: Boolean = false) {
         if (_activePackage.value == packageName) return
@@ -636,6 +645,7 @@ class FloatingWindowStateManager @Inject constructor(
 
     fun onDestroy(){
         _isBubbleExpanded.value = false
+        autoFreeze.releaseNow()
         eventHandler.clear()
         WxRuntime.detach(eventHandler.wx)
         eventHandler.wx.release()
