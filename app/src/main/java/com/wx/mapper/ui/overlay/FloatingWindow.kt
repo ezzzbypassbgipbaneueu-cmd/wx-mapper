@@ -747,8 +747,7 @@ fun SettingsLayout(
         Slider(
             value = pointerSensitivity,
             onValueChange = onPointerSensChange,
-            valueRange = 0.1f..1.0f,
-            steps = 8
+            valueRange = 0.05f..3.0f
         )
         Row {
             Text(

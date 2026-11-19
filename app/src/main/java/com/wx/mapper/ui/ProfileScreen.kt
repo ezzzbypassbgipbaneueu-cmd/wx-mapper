@@ -202,7 +202,7 @@ fun ProfileScreen(
                     value = sensitivity,
                     onValueChange = { sensitivity = it },
                     onValueChangeFinished = { onSaveProfile(profile.copy(pointerSensitivity = sensitivity, overlayOpacity = opacity)) },
-                    valueRange = 0.05f..1f
+                    valueRange = 0.05f..3f
                 )
                 Text("Opacidade dos botões: ${(opacity * 100).roundToInt()}%", style = MaterialTheme.typography.bodyMedium)
                 Slider(

@@ -250,8 +250,7 @@ fun ProfilePanel(
                 label = "Sensibilidade",
                 valueText = "${(pointerSensitivity * 100).roundToInt()} %",
                 value = pointerSensitivity,
-                range = 0.1f..1.0f,
-                steps = 8,
+                range = 0.05f..3.0f,
                 onChange = onPointerSensChange
             )
         }
