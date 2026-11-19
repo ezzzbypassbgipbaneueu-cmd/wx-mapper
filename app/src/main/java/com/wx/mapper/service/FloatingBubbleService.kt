@@ -49,6 +49,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.input.pointer.pointerInput
@@ -202,6 +203,38 @@ class FloatingBubbleService : Service() {
         scheduleCapture(100)
     }
 
+    /**
+     * Recria a superfície do overlay: reaplica os flags da janela e força um novo desenho.
+     * É o mesmo efeito de abrir e fechar a bolinha, só que automático quando o sistema pode ter
+     * descartado o buffer do overlay (pouca memória, tela ligando).
+     */
+    private fun refreshOverlay() {
+        val root = containerRoot ?: return
+        try {
+            val sm = stateManager.get()
+            applyOverlayMode(sm.isBubbleExpanded.value, sm.isTypingMode.value)
+            root.invalidate()
+            containerView?.invalidate()
+            floatingBubbleView?.invalidate()
+        } catch (_: Exception) {
+        }
+    }
+
+    private val screenReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: android.content.Context?, intent: Intent?) {
+            containerRoot?.postDelayed({ refreshOverlay() }, 400)
+        }
+    }
+    private var screenReceiverRegistered = false
+
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        // O sistema pode soltar os buffers do overlay quando falta memória; redesenha depois.
+        if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_MODERATE) {
+            containerRoot?.postDelayed({ refreshOverlay() }, 600)
+        }
+    }
+
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
         onScreenChanged()
@@ -214,6 +247,14 @@ class FloatingBubbleService : Service() {
             return START_NOT_STICKY
         }
         _isRunning.value = true
+        if (!screenReceiverRegistered) {
+            val filter = android.content.IntentFilter().apply {
+                addAction(Intent.ACTION_SCREEN_ON)
+                addAction(Intent.ACTION_USER_PRESENT)
+            }
+            ContextCompat.registerReceiver(this, screenReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
+            screenReceiverRegistered = true
+        }
         val channel = NotificationChannel(
             "channel1",
             "WX MAPPER Overlay Service",
@@ -561,7 +602,12 @@ class FloatingBubbleService : Service() {
                     if (!isBubbleExpanded && isRecording && !keepHud)
                         return@Box
                     ItemsContainer(
-                        Modifier.alpha(if (isBubbleExpanded) 1f else itemsContainerOpacity),
+                        // ModulateAlpha: cada botão é desenhado já com a opacidade, SEM criar uma camada
+                        // (buffer) de tela cheia. Essa camada era a suspeita da "tela escura".
+                        Modifier.graphicsLayer {
+                            alpha = if (isBubbleExpanded) 1f else itemsContainerOpacity
+                            compositingStrategy = androidx.compose.ui.graphics.CompositingStrategy.ModulateAlpha
+                        },
                         appConfig = keysConfig,
                         containerItems = draggableItems,
                         editingEnabled = isBubbleExpanded,
@@ -606,6 +652,10 @@ class FloatingBubbleService : Service() {
 
     override fun onDestroy() {
         _isRunning.value = false
+        if (screenReceiverRegistered) {
+            try { unregisterReceiver(screenReceiver) } catch (_: Exception) {}
+            screenReceiverRegistered = false
+        }
         removeAllViews()
         stateManager.get().onDestroy()
         lifecycleOwner.handleLifecycleEvent(Lifecycle.Event.ON_DESTROY)
@@ -906,6 +956,13 @@ class FloatingBubbleService : Service() {
                         onNextCursorImage = { stateManager.get().cycleCursorImage() },
                         performanceMode = keysConfig.performanceMode,
                         onPerformanceModeChange = { stateManager.get().updatePerformanceMode(it) },
+                        onOpenAimTrainer = {
+                            val intent = Intent(baseContext, com.wx.mapper.ui.AimTrainerActivity::class.java).apply {
+                                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                            }
+                            baseContext.startActivity(intent)
+                            stateManager.get().onFloatingBubbleClick()
+                        },
                         autoTypingMode = keysConfig.autoTypingMode,
                         onAutoTypingChange = { stateManager.get().updateAutoTyping(it) },
                         onTypingModeClick = {

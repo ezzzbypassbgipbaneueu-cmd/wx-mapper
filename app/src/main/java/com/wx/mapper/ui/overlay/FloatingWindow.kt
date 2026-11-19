@@ -713,6 +713,7 @@ fun SettingsLayout(
     showCursorSection: Boolean = false,
     performanceMode: Boolean = false,
     onPerformanceModeChange: (Boolean) -> Unit = {},
+    onOpenAimTrainer: () -> Unit = {},
     autoTypingMode: Boolean = true,
     onAutoTypingChange: (Boolean) -> Unit = {},
     onTypingModeClick: () -> Unit = {},
@@ -851,6 +852,8 @@ fun SettingsLayout(
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
         )
+        HorizontalDivider()
+        TextButton(onClick = onOpenAimTrainer) { Text("Abrir treino de mira") }
         HorizontalDivider()
         Text(
             text = "Digitar / Gravar",
