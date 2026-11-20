@@ -43,6 +43,7 @@ import com.wx.mapper.data.external.ShizukuShell
 import com.wx.mapper.service.TypingState
 import com.wx.mapper.ui.theme.WxTheme
 import com.wx.mapper.util.FreezeStore
+import com.wx.mapper.util.GameOptimizer
 import com.wx.mapper.util.PsParser
 import com.wx.mapper.util.PsRow
 import kotlinx.coroutines.Dispatchers
@@ -171,6 +172,9 @@ private fun ProcessManagerScreen() {
     var autoEnabled by remember { mutableStateOf(FreezeStore.autoEnabled(ctx)) }
     var autoList by remember { mutableStateOf(FreezeStore.autoList(ctx)) }
     val detectorOn by TypingState.serviceConnected.collectAsState()
+    var optEnabled by remember { mutableStateOf(GameOptimizer.enabled(ctx)) }
+    var optFlags by remember { mutableStateOf(GameOptimizer.Opt.values().associateWith { GameOptimizer.isOn(ctx, it) }) }
+    var optMessage by remember { mutableStateOf("") }
 
     fun refresh() {
         scope.launch {
@@ -236,7 +240,7 @@ private fun ProcessManagerScreen() {
                 Text("Congelar sozinho ao abrir o jogo", style = MaterialTheme.typography.titleSmall)
                 Text(
                     if (autoList.isEmpty()) "Lista automática vazia. Marque apps abaixo e toque em \"Adicionar à lista automática\"."
-                    else "Lista automática: ${autoList.size} app(s). Congela ao abrir um jogo do WX e descongela 8 s depois que você sai.",
+                    else "Lista automática: ${autoList.size} app(s). Congela ao abrir um jogo do WX e descongela uns 6 s depois que você sai (e confere sozinho de novo se falhar).",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
                 )
@@ -307,6 +311,71 @@ private fun ProcessManagerScreen() {
         }
 
         LazyColumn(modifier = Modifier.fillMaxSize()) {
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Otimizar sozinho ao abrir o jogo", style = MaterialTheme.typography.titleSmall)
+                            Text(
+                                "Aplica ao abrir o jogo e desfaz ao sair.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                            )
+                        }
+                        Switch(
+                            checked = optEnabled,
+                            onCheckedChange = {
+                                optEnabled = it
+                                GameOptimizer.setEnabled(ctx, it)
+                            }
+                        )
+                    }
+                    GameOptimizer.Opt.values().forEach { opt ->
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Checkbox(
+                                checked = optFlags[opt] == true,
+                                onCheckedChange = { v ->
+                                    GameOptimizer.setOn(ctx, opt, v)
+                                    optFlags = optFlags + (opt to v)
+                                }
+                            )
+                            Column {
+                                Text(opt.label, style = MaterialTheme.typography.bodyMedium)
+                                Text(
+                                    opt.hint,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                                )
+                            }
+                        }
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            enabled = !busy,
+                            onClick = {
+                                scope.launch {
+                                    busy = true
+                                    optMessage = "Otimizando… (a compilação pode levar alguns minutos)"
+                                    val game = GameOptimizer.lastGame(ctx)
+                                    optMessage = withContext(Dispatchers.IO) { GameOptimizer.optimizeNow(ctx, game) }
+                                    busy = false
+                                }
+                            }
+                        ) { Text("Otimizar agora") }
+                        OutlinedButton(
+                            enabled = !busy,
+                            onClick = {
+                                scope.launch {
+                                    val ok = withContext(Dispatchers.IO) { GameOptimizer.restore(ctx) }
+                                    optMessage = if (ok) "Animações e GOS restaurados." else "Não consegui restaurar tudo."
+                                }
+                            }
+                        ) { Text("Desfazer ajustes") }
+                    }
+                    if (optMessage.isNotBlank()) Text(optMessage, style = MaterialTheme.typography.bodySmall)
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                }
+            }
             if (autoList.isNotEmpty()) {
                 item {
                     Text(

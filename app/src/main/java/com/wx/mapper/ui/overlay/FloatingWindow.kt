@@ -736,7 +736,7 @@ fun SettingsLayout(
                 fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f)
             )
             Text(
-                "${(pointerSensitivity * 100).roundToInt()} %",
+                com.wx.mapper.util.Sensitivity.format(pointerSensitivity),
                 modifier = Modifier
                     .padding(start = 16.dp)
                     .align(Alignment.CenterVertically),
@@ -745,9 +745,9 @@ fun SettingsLayout(
         }
 
         Slider(
-            value = pointerSensitivity,
-            onValueChange = onPointerSensChange,
-            valueRange = 0.05f..3.0f
+            value = com.wx.mapper.util.Sensitivity.toSlider(pointerSensitivity),
+            onValueChange = { onPointerSensChange(com.wx.mapper.util.Sensitivity.fromSlider(it)) },
+            valueRange = 0f..1f
         )
         Row {
             Text(

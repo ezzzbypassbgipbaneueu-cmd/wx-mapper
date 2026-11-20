@@ -248,10 +248,10 @@ fun ProfilePanel(
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
             LabeledSlider(
                 label = "Sensibilidade",
-                valueText = "${(pointerSensitivity * 100).roundToInt()} %",
-                value = pointerSensitivity,
-                range = 0.05f..3.0f,
-                onChange = onPointerSensChange
+                valueText = com.wx.mapper.util.Sensitivity.format(pointerSensitivity),
+                value = com.wx.mapper.util.Sensitivity.toSlider(pointerSensitivity),
+                range = 0f..1f,
+                onChange = { onPointerSensChange(com.wx.mapper.util.Sensitivity.fromSlider(it)) }
             )
         }
         TextButton(onClick = onManageProfiles) { Text("Gerenciar perfis no app…") }

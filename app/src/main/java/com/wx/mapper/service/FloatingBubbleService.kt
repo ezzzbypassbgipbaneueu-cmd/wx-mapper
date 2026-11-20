@@ -109,6 +109,7 @@ class FloatingBubbleService : Service() {
     companion object {
         val INTENT_EXTRA_PACAKAGE = "launchedPackageName"
         const val ACTION_TOGGLE_RECORDING = "com.wx.mapper.action.TOGGLE_RECORDING"
+        const val ACTION_RELEASE_FROZEN = "com.wx.mapper.action.RELEASE_FROZEN"
         private val _isRunning = MutableStateFlow(false)
         val isRunning = _isRunning.asStateFlow()
     }
@@ -160,6 +161,16 @@ class FloatingBubbleService : Service() {
         return containerRoot != null && !sm.isBubbleExpanded.value && !sm.isTypingMode.value
     }
 
+    /**
+     * Pede ao sistema para entregar os movimentos do mouse na hora, sem juntar vários por frame.
+     * Menos "saltos" do cursor quando o FPS está baixo. Só existe a partir do Android 12.
+     */
+    private fun requestUnbufferedMouse(v: View) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            try { v.requestUnbufferedDispatch(android.view.InputDevice.SOURCE_MOUSE_RELATIVE) } catch (_: Throwable) {}
+        }
+    }
+
     /** Agenda (com debounce) uma nova tentativa de captura. */
     private fun scheduleCapture(delayMs: Long = 0L, resetAttempts: Boolean = true) {
         val v = containerView ?: return
@@ -177,6 +188,7 @@ class FloatingBubbleService : Service() {
         }
         if (!v.hasFocus()) v.requestFocus()
         if (!v.hasPointerCapture()) v.requestPointerCapture()
+        requestUnbufferedMouse(v)
         // Se a janela ainda não tem foco (rotação em andamento), tenta de novo em instantes.
         if (!v.hasPointerCapture() && captureAttempts++ < 20) {
             scheduleCapture(250, resetAttempts = false)
@@ -246,6 +258,12 @@ class FloatingBubbleService : Service() {
             if (containerRoot != null) stateManager.get().toggleRecordingMode()
             return START_NOT_STICKY
         }
+        if (intent?.action == ACTION_RELEASE_FROZEN) {
+            if (containerRoot != null) stateManager.get().releaseFrozenNow()
+            return START_NOT_STICKY
+        }
+        // Thread principal com prioridade de tela: o cursor sofre menos com o jogo disputando CPU.
+        try { android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_DISPLAY) } catch (_: Throwable) {}
         _isRunning.value = true
         if (!screenReceiverRegistered) {
             val filter = android.content.IntentFilter().apply {
@@ -266,24 +284,9 @@ class FloatingBubbleService : Service() {
         }
         val notificationManager = getSystemService(NotificationManager::class.java)
         notificationManager.createNotificationChannel(channel)
-        val toggleIntent = PendingIntent.getService(
-            this, 1,
-            Intent(this, FloatingBubbleService::class.java).setAction(ACTION_TOGGLE_RECORDING),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        val notification = buildNotification(
+            runCatching { stateManager.get().recordingMode.value }.getOrDefault(false)
         )
-        val notification = NotificationCompat.Builder(this, "channel1").apply {
-            setSmallIcon(R.drawable.ic_launcher_monochrome)
-            addAction(0, "Esconder / mostrar tudo (gravação)", toggleIntent)
-            setContentTitle(ContextCompat.getString(baseContext, R.string.app_name))
-            setContentText(
-                "${
-                    ContextCompat.getString(
-                        baseContext,
-                        R.string.app_name
-                    )
-                } Overlay service is running"
-            )
-        }.build()
         startForeground(1, notification)
 
         if (lifecycleOwner.lifecycle.currentState == Lifecycle.State.INITIALIZED) {
@@ -292,6 +295,42 @@ class FloatingBubbleService : Service() {
         lifecycleOwner.handleLifecycleEvent(Lifecycle.Event.ON_START)
         init()
         return START_NOT_STICKY
+    }
+
+    private fun buildNotification(recording: Boolean): android.app.Notification {
+        fun pi(code: Int, action: String) = PendingIntent.getService(
+            this, code,
+            Intent(this, FloatingBubbleService::class.java).setAction(action),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val app = ContextCompat.getString(baseContext, R.string.app_name)
+        return NotificationCompat.Builder(this, "channel1").apply {
+            setSmallIcon(R.drawable.ic_launcher_monochrome)
+            setOnlyAlertOnce(true)
+            setOngoing(true)
+            if (recording) {
+                setContentTitle("● MODO GRAVAÇÃO LIGADO")
+                setContentText("Botões escondidos da gravação. Toque na ação para mostrar tudo.")
+                addAction(0, "Mostrar tudo (sair da gravação)", pi(1, ACTION_TOGGLE_RECORDING))
+            } else {
+                setContentTitle(app)
+                setContentText("Overlay ativo • modo gravação desligado")
+                addAction(0, "Esconder tudo (gravação)", pi(1, ACTION_TOGGLE_RECORDING))
+            }
+            addAction(0, "Descongelar apps", pi(2, ACTION_RELEASE_FROZEN))
+        }.build()
+    }
+
+    /** Vibra 1x ao ligar o modo gravação e 2x ao desligar: dá para sentir o estado sem olhar a tela. */
+    private fun buzzRecording(on: Boolean) {
+        try {
+            @Suppress("DEPRECATION")
+            val vib = getSystemService(android.os.Vibrator::class.java) ?: return
+            val effect = if (on) android.os.VibrationEffect.createOneShot(90, android.os.VibrationEffect.DEFAULT_AMPLITUDE)
+            else android.os.VibrationEffect.createWaveform(longArrayOf(0, 45, 70, 45), -1)
+            vib.vibrate(effect)
+        } catch (_: Throwable) {
+        }
     }
 
     private fun applyCutoutAndInsets(lp: WindowManager.LayoutParams) {
@@ -399,6 +438,15 @@ class FloatingBubbleService : Service() {
         // Reaplica SKIP_SCREENSHOT se o sistema recriar a camada (relayout) durante a gravação.
         floatingBubbleView?.addOnLayoutChangeListener { v, _, _, _, _, _, _, _, _ ->
             if (skipActive) ScreenshotExclusion.setSkip(v, true)
+        }
+        scope.launch {
+            // Indicador do modo gravação: notificação + vibração (não aparecem na gravação).
+            var first = true
+            stateManager.get().recordingMode.collect { on ->
+                getSystemService(NotificationManager::class.java).notify(1, buildNotification(on))
+                if (!first) buzzRecording(on)
+                first = false
+            }
         }
         scope.launch {
             // Modo gravação (config "recordingHideMode"):
@@ -557,7 +605,7 @@ class FloatingBubbleService : Service() {
                 val isBubbleExpanded by stateManager.get().isBubbleExpanded.collectAsState()
                 val isShootingMode by stateManager.get().isShootingMode.collectAsState()
                 // State (sem delegate `by`): ler `.value` só no desenho evita recompor a cada movimento do mouse.
-                val pointerState = stateManager.get().pointerOffset.collectAsState()
+                val pointerState = stateManager.get().pointerPositionState
                 val keysConfig by stateManager.get().keysConfig.collectAsState()
                 val windowOrigin by stateManager.get().windowOrigin.collectAsState()
                 val isTyping by stateManager.get().isTypingMode.collectAsState()
@@ -567,6 +615,23 @@ class FloatingBubbleService : Service() {
                 val keepHud = keysConfig.recordingHideMode != RecordingHideMode.BUTTONS_ONLY && !skipFailedState
                 val macroRecording by stateManager.get().macroRecording.collectAsState()
                 Box {
+                    // Selo do modo gravação: só quando o overlay continua visível para você mas é
+                    // excluído da captura (SKIP_SCREENSHOT / FLAG_SECURE). No modo "só botões" o selo
+                    // sairia na gravação, então lá o aviso é a notificação + vibração.
+                    if (isRecording && keepHud) {
+                        androidx.compose.material3.Text(
+                            "● REC (modo gravação)",
+                            color = androidx.compose.ui.graphics.Color.White,
+                            fontSize = androidx.compose.ui.unit.TextUnit(11f, androidx.compose.ui.unit.TextUnitType.Sp),
+                            modifier = Modifier
+                                .padding(start = 8.dp, top = 44.dp)
+                                .background(
+                                    androidx.compose.ui.graphics.Color(0xCC1565C0),
+                                    androidx.compose.foundation.shape.RoundedCornerShape(8.dp)
+                                )
+                                .padding(horizontal = 8.dp, vertical = 3.dp)
+                        )
+                    }
                     if (macroRecording && (!isRecording || keepHud)) {
                         androidx.compose.material3.Text(
                             "● GRAVANDO MACRO — aperte ${keysConfig.macroRecordKeyCode.keyCodeToString()} para parar",

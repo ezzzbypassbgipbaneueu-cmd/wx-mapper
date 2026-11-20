@@ -63,10 +63,25 @@ class FloatingWindowStateManager @Inject constructor(
         windowManager.defaultDisplay.getRealMetrics(m)
         return m
     }
+    // Antes cada movimento do mouse chamava realMetrics() DUAS vezes (cria DisplayMetrics + chamada
+    // ao sistema). Agora o tamanho fica em cache por 400 ms; rotação força atualização na hora.
+    private var cachedW = 0
+    private var cachedH = 0
+    private var cachedAt = 0L
+
+    private fun metrics() {
+        val now = android.os.SystemClock.uptimeMillis()
+        if (cachedW > 0 && cachedH > 0 && now - cachedAt < 400L) return
+        val m = realMetrics()
+        cachedW = m.widthPixels.takeIf { it > 0 } ?: displayMetrics.widthPixels
+        cachedH = m.heightPixels.takeIf { it > 0 } ?: displayMetrics.heightPixels
+        cachedAt = now
+    }
+
     val screenWidthPx: Int
-        get() = realMetrics().widthPixels.takeIf { it > 0 } ?: displayMetrics.widthPixels
+        get() { metrics(); return cachedW }
     val screenHeightPx: Int
-        get() = realMetrics().heightPixels.takeIf { it > 0 } ?: displayMetrics.heightPixels
+        get() { metrics(); return cachedH }
 
     /**
      * Canto superior esquerdo da janela do overlay NA TELA. Se o sistema desloca a janela
@@ -142,6 +157,13 @@ class FloatingWindowStateManager @Inject constructor(
         MutableStateFlow(Offset(screenWidthPx / 2f, screenHeightPx / 2f))
     val pointerOffset = _mousePointerOffset.asStateFlow()
 
+    /**
+     * Mesma posição, mas como State do Compose escrito DIRETO no evento do mouse: o cursor lê isso
+     * na camada de desenho, sem passar pelo coletor do Flow (menos um salto de thread/frame, o que
+     * deixava o cursor "pulando" quando a thread principal estava ocupada).
+     */
+    val pointerPositionState = androidx.compose.runtime.mutableStateOf(_mousePointerOffset.value)
+
     /** Modo gravação: esconde TUDO do keymapper (botões, cursor e bolha). O mapeamento continua. */
     val recordingMode = MutableStateFlow(false)
 
@@ -165,7 +187,12 @@ class FloatingWindowStateManager @Inject constructor(
     val isShootingMode = eventHandler.shootingModeFlow
 
     // Declarado ANTES do init: o init já inicia o observador que usa isso.
-    private val autoFreeze = AutoFreezeManager(context, scope)
+    private val autoFreeze = AutoFreezeManager(context, scope) { pkg ->
+        dataStoreManager.getList(DataStoreManager.ADDED_PACKAGES).first().contains(pkg)
+    }
+
+    /** Botão "Descongelar" da notificação. */
+    fun releaseFrozenNow() = autoFreeze.releaseManually()
 
     init {
         lastScreenW = screenWidthPx
@@ -308,6 +335,7 @@ class FloatingWindowStateManager @Inject constructor(
      * limites novos. Sem isso ele podia ficar fora da tela até o próximo movimento.
      */
     fun onScreenSizeChanged() {
+        cachedAt = 0L
         val w = screenWidthPx
         val h = screenHeightPx
         if (w <= 0 || h <= 0) return
@@ -321,6 +349,7 @@ class FloatingWindowStateManager @Inject constructor(
             (old.y * h / oh).coerceIn(0f, (h - 1).coerceAtLeast(0).toFloat())
         )
         _mousePointerOffset.value = moved
+        pointerPositionState.value = moved
         eventHandler.mousePointerPosition = moved
     }
 
@@ -544,6 +573,7 @@ class FloatingWindowStateManager @Inject constructor(
                         )
                     )
                     _mousePointerOffset.value = newPosition
+                    pointerPositionState.value = newPosition
                     eventHandler.mousePointerPosition = newPosition
 
                     // Inject only the movement that was actually applied after edge clamping.

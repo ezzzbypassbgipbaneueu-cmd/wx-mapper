@@ -197,12 +197,12 @@ fun ProfileScreen(
             GlassCard {
                 SectionTitle("Mouse e botões")
                 Spacer(Modifier.size(6.dp))
-                Text("Sensibilidade: ${(sensitivity * 100).roundToInt()}%", style = MaterialTheme.typography.bodyMedium)
+                Text("Sensibilidade: ${com.wx.mapper.util.Sensitivity.format(sensitivity)}", style = MaterialTheme.typography.bodyMedium)
                 Slider(
-                    value = sensitivity,
-                    onValueChange = { sensitivity = it },
+                    value = com.wx.mapper.util.Sensitivity.toSlider(sensitivity),
+                    onValueChange = { sensitivity = com.wx.mapper.util.Sensitivity.fromSlider(it) },
                     onValueChangeFinished = { onSaveProfile(profile.copy(pointerSensitivity = sensitivity, overlayOpacity = opacity)) },
-                    valueRange = 0.05f..3f
+                    valueRange = 0f..1f
                 )
                 Text("Opacidade dos botões: ${(opacity * 100).roundToInt()}%", style = MaterialTheme.typography.bodyMedium)
                 Slider(
