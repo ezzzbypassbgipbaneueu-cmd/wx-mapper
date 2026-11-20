@@ -55,6 +55,7 @@ abstract class EventInjectorImpl(private val eventManager: EventManager = EventM
     private suspend fun injectMotion(action: Int) {
         val event = eventManager.createMotionEvent(action)
         event?.let {
+            com.wx.mapper.util.TapIndicator.onMotion(it)
             inject(it)
             it.recycle()
         }
@@ -64,6 +65,7 @@ abstract class EventInjectorImpl(private val eventManager: EventManager = EventM
     private suspend fun injectMoveFast() {
         val event = eventManager.createMotionEvent(MotionEvent.ACTION_MOVE)
         event?.let {
+            com.wx.mapper.util.TapIndicator.onMotion(it)
             injectFast(it)
             it.recycle()
         }
@@ -213,12 +215,14 @@ abstract class EventInjectorImpl(private val eventManager: EventManager = EventM
             val down = eventManager.getPointerAction(pointerID, false)
             if (down == -1) return@enqueue
             eventManager.createMotionEvent(down, t)?.let {
+                com.wx.mapper.util.TapIndicator.onMotion(it)
                 injectFast(it)
                 it.recycle()
             }
             val up = eventManager.getPointerAction(pointerID, true)
             if (up != -1) {
                 eventManager.createMotionEvent(up, t)?.let {
+                    com.wx.mapper.util.TapIndicator.onMotion(it)
                     injectFast(it)
                     it.recycle()
                 }

@@ -223,6 +223,7 @@ fun MainScreen(
     val appContext = LocalContext.current
     val toolScope = rememberCoroutineScope()
     var cleaningCache by remember { mutableStateOf(false) }
+    var showTaps by remember { mutableStateOf(com.wx.mapper.util.TapIndicator.isEnabled(appContext)) }
     val packages by viewModel.addedPackages.collectAsState()
     val summaries by viewModel.summaries.collectAsState()
     val connectedDevices by viewModel.connectedDevices.collectAsState()
@@ -302,6 +303,16 @@ fun MainScreen(
                     fontWeight = FontWeight.SemiBold,
                     color = Color.White,
                     modifier = Modifier.padding(top = 4.dp)
+                )
+            }
+            item {
+                ToolCard(
+                    title = if (showTaps) "Mostrar toques: LIGADO" else "Mostrar toques: desligado",
+                    subtitle = "Círculo nos toques que o WX envia ao jogo. Aparece na gravação de tela, mesmo com o modo gravação.",
+                    onClick = {
+                        showTaps = !showTaps
+                        com.wx.mapper.util.TapIndicator.setEnabled(appContext, showTaps)
+                    }
                 )
             }
             item {

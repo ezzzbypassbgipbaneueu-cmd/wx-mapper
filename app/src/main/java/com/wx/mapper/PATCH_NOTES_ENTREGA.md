@@ -7,3 +7,4 @@
 5. Cursor: posição escrita direto no State do Compose, entrega de mouse sem agrupar (requestUnbufferedDispatch) e thread principal com prioridade de tela.
 
 Não foi possível compilar/testar neste ambiente (sem Gradle/rede).
+6. Mostrar toques proprio (TapIndicator): Ferramentas > Mostrar toques; circulo aparece na gravacao.

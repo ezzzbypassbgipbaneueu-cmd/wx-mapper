@@ -348,6 +348,7 @@ class FloatingBubbleService : Service() {
 
     private fun init() {
         if (containerRoot != null) return // já inicializado
+        com.wx.mapper.util.TapIndicator.start(this)
 
         floatingBubbleLP = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
@@ -721,6 +722,7 @@ class FloatingBubbleService : Service() {
             try { unregisterReceiver(screenReceiver) } catch (_: Exception) {}
             screenReceiverRegistered = false
         }
+        com.wx.mapper.util.TapIndicator.stop()
         removeAllViews()
         stateManager.get().onDestroy()
         lifecycleOwner.handleLifecycleEvent(Lifecycle.Event.ON_DESTROY)
