@@ -1,5 +1,10 @@
 package com.wx.mapper.ui
 
+import android.text.format.Formatter
+import android.widget.Toast
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
+import com.wx.mapper.util.CacheCleaner
 import android.content.Intent
 import android.graphics.drawable.Drawable
 import androidx.compose.animation.AnimatedVisibility
@@ -216,6 +221,8 @@ fun MainScreen(
     onPackageIconClick: (String) -> Unit
 ) {
     val appContext = LocalContext.current
+    val toolScope = rememberCoroutineScope()
+    var cleaningCache by remember { mutableStateOf(false) }
     val packages by viewModel.addedPackages.collectAsState()
     val summaries by viewModel.summaries.collectAsState()
     val connectedDevices by viewModel.connectedDevices.collectAsState()
@@ -302,6 +309,26 @@ fun MainScreen(
                     title = "Treino de mira",
                     subtitle = "Bolinha em movimento para treinar com o cursor do WX, mouse ou toque.",
                     onClick = { appContext.startActivity(Intent(appContext, AimTrainerActivity::class.java)) }
+                )
+            }
+            item {
+                ToolCard(
+                    title = if (cleaningCache) "Limpando cache…" else "Limpar cache",
+                    subtitle = "Apaga o cache de todos os apps e libera espaço (precisa do Shizuku).",
+                    onClick = {
+                        if (!cleaningCache) {
+                            cleaningCache = true
+                            Toast.makeText(appContext, "Limpando cache…", Toast.LENGTH_SHORT).show()
+                            toolScope.launch {
+                                val res = withContext(Dispatchers.IO) { CacheCleaner.clean() }
+                                cleaningCache = false
+                                val text = if (res.ok) {
+                                    "Cache limpo. Liberado: ${Formatter.formatShortFileSize(appContext, res.freedBytes)}"
+                                } else res.message
+                                Toast.makeText(appContext, text, Toast.LENGTH_LONG).show()
+                            }
+                        }
+                    }
                 )
             }
             item {

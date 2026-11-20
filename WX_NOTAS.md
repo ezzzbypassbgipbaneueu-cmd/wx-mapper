@@ -19,4 +19,5 @@ Package `com.wx.mapper`.
 
 ## Build
 `./gradlew testDebugUnitTest assembleDebug` → app/build/outputs/apk/debug/app-debug.apk
-Ou suba para o GitHub: o workflow `.github/workflows/release-apk.yml` gera o APK debug.
+Para usar de verdade (bem mais fluido): `./gradlew assembleRelease` → app/build/outputs/apk/release/app-release.apk.
+Ou suba para o GitHub: o workflow `.github/workflows/release-apk.yml` gera o APK **release** (o debug é lento).

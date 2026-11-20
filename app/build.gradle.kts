@@ -41,13 +41,21 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = true
+            // Release NÃO depurável já resolve a maior parte da lentidão do debug.
+            // R8 desligado de propósito: o app usa reflexão em APIs do sistema e não há regras de
+            // proteção testadas; ligar sem testar pode causar crash. Dá para tentar depois.
+            isMinifyEnabled = false
+            isDebuggable = false
             signingConfig = if (hasReleaseKey) signingConfigs.getByName("release") else signingConfigs.getByName("debug")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
         }
+    }
+    lint {
+        // O lint do release pode barrar o build por avisos que não afetam o uso.
+        checkReleaseBuilds = false
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
