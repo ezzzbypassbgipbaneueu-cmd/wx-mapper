@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
@@ -112,7 +113,7 @@ private fun MusicScreen() {
                     )
                 } else {
                     LazyColumn {
-                        androidx.compose.foundation.lazy.items(lib.keys.toList()) { name ->
+                        items(lib.keys.toList()) { name ->
                             Column(
                                 modifier = Modifier
                                     .fillMaxWidth()
