@@ -348,7 +348,7 @@ class FloatingBubbleService : Service() {
 
     private fun init() {
         if (containerRoot != null) return // já inicializado
-        com.wx.mapper.util.TapIndicator.start(this)
+        com.wx.mapper.music.MusicPlayer.init(this)
 
         floatingBubbleLP = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
@@ -506,6 +506,7 @@ class FloatingBubbleService : Service() {
                 }
         }
         stateManager.get().windowManager.addView(containerRoot, itemsContainerLP)
+        com.wx.mapper.util.TapIndicator.start(this) { containerRoot }
         floatingBubbleLP.y = 200
         stateManager.get().windowManager.addView(floatingBubbleView, floatingBubbleLP)
         if (!displayListenerRegistered) {
@@ -760,6 +761,7 @@ class FloatingBubbleService : Service() {
         var settingsLayoutVisible by remember { mutableStateOf(false) }
         var profileVisible by remember { mutableStateOf(false) }
         var cursorVisible by remember { mutableStateOf(false) }
+        var musicVisible by remember { mutableStateOf(false) }
         LaunchedEffect(isExpanded) {
             opacity = if (isExpanded) 1f else 0.5f
             itemsMenuVisible = isExpanded && itemsMenuVisible
@@ -841,6 +843,7 @@ class FloatingBubbleService : Service() {
                             settingsLayoutVisible = false
                             profileVisible = false
                             cursorVisible = false
+                            musicVisible = false
                         }) {
                             Icon(
                                 imageVector = Icons.Rounded.Add,
@@ -854,6 +857,7 @@ class FloatingBubbleService : Service() {
                             itemsMenuVisible = false
                             settingsLayoutVisible = false
                             cursorVisible = false
+                            musicVisible = false
                         }) {
                             Icon(
                                 imageVector = Icons.Rounded.Person,
@@ -867,8 +871,19 @@ class FloatingBubbleService : Service() {
                             itemsMenuVisible = false
                             settingsLayoutVisible = false
                             profileVisible = false
+                            musicVisible = false
                         }) {
                             CursorGlyph(color = MaterialTheme.colorScheme.onSurface)
+                        }
+                        RailButton(selected = musicVisible, onClick = {
+                            val next = !musicVisible
+                            musicVisible = next
+                            itemsMenuVisible = false
+                            settingsLayoutVisible = false
+                            profileVisible = false
+                            cursorVisible = false
+                        }) {
+                            androidx.compose.material3.Text("♪", color = MaterialTheme.colorScheme.onSurface)
                         }
                         RailButton(selected = settingsLayoutVisible, onClick = {
                             val next = !settingsLayoutVisible
@@ -876,6 +891,7 @@ class FloatingBubbleService : Service() {
                             itemsMenuVisible = false
                             profileVisible = false
                             cursorVisible = false
+                            musicVisible = false
                         }) {
                             Icon(
                                 imageVector = Icons.Rounded.Settings,
@@ -944,6 +960,25 @@ class FloatingBubbleService : Service() {
                             sm.onFloatingBubbleClick()
                         }
                     )
+                }
+                AnimatedVisibility(
+                    visible = musicVisible,
+                    enter = fadeIn(),
+                    exit = fadeOut(),
+                    modifier = Modifier
+                        .padding(start = 4.dp)
+                        .constrainAs(otherLayout) {
+                            start.linkTo(bubble.end)
+                            top.linkTo(parent.top)
+                            bottom.linkTo(parent.bottom)
+                        }) {
+                    com.wx.mapper.ui.overlay.MusicPanel(onOpenApp = {
+                        baseContext.startActivity(
+                            Intent(baseContext, com.wx.mapper.ui.MusicActivity::class.java)
+                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        )
+                        stateManager.get().onFloatingBubbleClick()
+                    })
                 }
                 AnimatedVisibility(
                     visible = cursorVisible,

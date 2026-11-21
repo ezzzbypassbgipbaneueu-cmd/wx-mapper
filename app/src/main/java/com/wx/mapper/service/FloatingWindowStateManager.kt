@@ -456,6 +456,7 @@ class FloatingWindowStateManager @Inject constructor(
             return false
         if (isTypingMode.value)
             return false
+        if (com.wx.mapper.music.MusicHotkeys.handle(keyEvent)) return true
         val config = _appConfig.value
         if (keyEvent.keyCode == config.recordingModeKeyCode) {
             if (keyEvent.action == KeyEvent.ACTION_DOWN && keyEvent.repeatCount == 0) toggleRecordingMode()

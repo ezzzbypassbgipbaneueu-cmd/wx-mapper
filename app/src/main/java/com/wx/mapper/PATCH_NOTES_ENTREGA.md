@@ -8,3 +8,5 @@
 
 Não foi possível compilar/testar neste ambiente (sem Gradle/rede).
 6. Mostrar toques proprio (TapIndicator): Ferramentas > Mostrar toques; circulo aparece na gravacao.
+7. Mostrar toques com 3 modos (desligado / janela propria / dentro do overlay), visual do Android-Show-Taps, alpha<0.8 para nao bloquear toque.
+8. Musica: /storage/emulated/0/msc/ (subpastas = playlists). Tela Musica, painel no overlay (icone ♪), atalhos Ctrl+Alt+Espaco/setas e teclas de midia.

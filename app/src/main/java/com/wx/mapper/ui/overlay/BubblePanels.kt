@@ -29,6 +29,13 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.platform.LocalContext
+import com.wx.mapper.music.MusicPlayer
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -414,5 +421,67 @@ fun CursorPanel(
                 }
             }
         }
+    }
+}
+
+
+/** Controles de música no overlay: dá para trocar de faixa/playlist sem sair do jogo. */
+@Composable
+fun MusicPanel(onOpenApp: () -> Unit, modifier: Modifier = Modifier) {
+    val ctx = LocalContext.current
+    val st by MusicPlayer.state.collectAsState()
+    val lib by MusicPlayer.library.collectAsState()
+    val access = MusicPlayer.hasAccess(ctx)
+    LaunchedEffect(access) {
+        if (access && !MusicPlayer.scanned) withContext(Dispatchers.IO) { MusicPlayer.scan() }
+    }
+    PanelSurface(modifier) {
+        PanelTitle("Música")
+        if (!access) {
+            Text("Falta permissão para ler /msc.", style = MaterialTheme.typography.bodySmall)
+            TextButton(onClick = onOpenApp) { Text("Abrir Música e permitir") }
+            return@PanelSurface
+        }
+        Text(
+            text = if (st.title.isEmpty()) "Nada tocando" else st.title,
+            style = MaterialTheme.typography.bodyMedium,
+            maxLines = 2,
+            modifier = Modifier.padding(bottom = 6.dp)
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            OptionChip("◀◀", false) { MusicPlayer.prev() }
+            OptionChip(if (st.playing) "❚❚" else "▶", st.playing) { MusicPlayer.toggle() }
+            OptionChip("▶▶", false) { MusicPlayer.next() }
+        }
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            modifier = Modifier.padding(top = 6.dp)
+        ) {
+            OptionChip("Aleatório", st.shuffle) { MusicPlayer.toggleShuffle() }
+            OptionChip("Repetir 1", st.repeatOne) { MusicPlayer.toggleRepeat() }
+        }
+        Text(
+            "Volume ${(st.volume * 100).roundToInt()}%",
+            style = MaterialTheme.typography.labelMedium,
+            modifier = Modifier.padding(top = 6.dp)
+        )
+        Slider(value = st.volume, onValueChange = { MusicPlayer.setVolume(it) })
+        HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+        if (lib.isEmpty()) {
+            Text(
+                if (MusicPlayer.scanned) "Nenhuma música em /storage/emulated/0/msc/" else "Procurando…",
+                style = MaterialTheme.typography.bodySmall
+            )
+        } else {
+            lib.keys.forEach { name ->
+                OptionChip("$name (${lib[name]?.size ?: 0})", st.playlist == name) { MusicPlayer.playPlaylist(name) }
+                Box(Modifier.size(4.dp))
+            }
+        }
+        Text(
+            "Atalhos: Ctrl+Alt+Espaço / ← / → / ↑ / ↓",
+            style = MaterialTheme.typography.labelSmall,
+            modifier = Modifier.padding(top = 6.dp)
+        )
     }
 }

@@ -5,6 +5,8 @@
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
         tools:ignore="QueryAllPackagesPermission" />
@@ -47,6 +49,12 @@
         <!-- Gerenciador de processos: lista apps em execução e permite parar/congelar. -->
         <activity
             android:name=".ui.ProcessManagerActivity"
+            android:exported="false"
+            android:theme="@style/Theme.WxMapper" />
+
+        <!-- Player de música (pasta /storage/emulated/0/msc/). -->
+        <activity
+            android:name=".ui.MusicActivity"
             android:exported="false"
             android:theme="@style/Theme.WxMapper" />
 

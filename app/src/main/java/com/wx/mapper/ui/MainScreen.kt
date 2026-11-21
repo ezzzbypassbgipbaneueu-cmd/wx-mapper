@@ -223,7 +223,7 @@ fun MainScreen(
     val appContext = LocalContext.current
     val toolScope = rememberCoroutineScope()
     var cleaningCache by remember { mutableStateOf(false) }
-    var showTaps by remember { mutableStateOf(com.wx.mapper.util.TapIndicator.isEnabled(appContext)) }
+    var tapMode by remember { mutableStateOf(com.wx.mapper.util.TapIndicator.mode(appContext)) }
     val packages by viewModel.addedPackages.collectAsState()
     val summaries by viewModel.summaries.collectAsState()
     val connectedDevices by viewModel.connectedDevices.collectAsState()
@@ -307,11 +307,22 @@ fun MainScreen(
             }
             item {
                 ToolCard(
-                    title = if (showTaps) "Mostrar toques: LIGADO" else "Mostrar toques: desligado",
-                    subtitle = "Círculo nos toques que o WX envia ao jogo. Aparece na gravação de tela, mesmo com o modo gravação.",
+                    title = "Música",
+                    subtitle = "Toca as playlists de /storage/emulated/0/msc/ (cada subpasta). Controle também pelo overlay (♪) e Ctrl+Alt+setas/Espaço.",
+                    onClick = { appContext.startActivity(Intent(appContext, com.wx.mapper.ui.MusicActivity::class.java)) }
+                )
+            }
+            item {
+                ToolCard(
+                    title = when (tapMode) {
+                        com.wx.mapper.util.TapIndicator.MODE_WINDOW -> "Mostrar toques: janela própria"
+                        com.wx.mapper.util.TapIndicator.MODE_INSIDE -> "Mostrar toques: dentro do overlay"
+                        else -> "Mostrar toques: desligado"
+                    },
+                    subtitle = "Toque para alternar. \"Janela própria\" aparece na gravação mesmo no modo gravação; se o Samsung avisar de toques atrasados, use \"dentro do overlay\" (some na gravação com captura excluída).",
                     onClick = {
-                        showTaps = !showTaps
-                        com.wx.mapper.util.TapIndicator.setEnabled(appContext, showTaps)
+                        tapMode = (tapMode + 1) % 3
+                        com.wx.mapper.util.TapIndicator.setMode(appContext, tapMode)
                     }
                 )
             }
