@@ -4,6 +4,8 @@ import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.PixelFormat
+import android.graphics.RadialGradient
+import android.graphics.Shader
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -133,120 +135,82 @@ object TapIndicator {
     }
 
     /**
-     * Visual copiado do projeto Android-Show-Taps: anel (só contorno) de 80 dp com traço de 5 dp,
-     * uma cor por dedo, rastro que acompanha o dedo por 200 ms e anel que some em 150 ms ao soltar.
+     * Visual do "Mostrar toques" nativo do Android: disco cinza-claro translúcido com borda suave,
+     * ponto branco no centro, sem rastro, e que some rápido ao soltar.
      */
     private class TapView(ctx: Context) : View(ctx) {
         private val dp = ctx.resources.displayMetrics.density
-        private val radius = 40f * dp
-        private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        private val radius = 26f * dp
+        private val disc = Paint(Paint.ANTI_ALIAS_FLAG)
+        private val edge = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.STROKE
-            strokeCap = Paint.Cap.ROUND
+            strokeWidth = 1.5f * dp
         }
-        private class Pt(val x: Float, val y: Float, val t: Long)
-        private class Finger(var x: Float, var y: Float, val trail: ArrayList<Pt> = ArrayList())
-        private class Fade(val id: Int, val x: Float, val y: Float, val start: Long)
+        private val dot = Paint(Paint.ANTI_ALIAS_FLAG)
+        private class Finger(var x: Float, var y: Float)
+        private class Fade(val x: Float, val y: Float, val start: Long)
 
         private val held = HashMap<Int, Finger>()
         private val fades = ArrayList<Fade>()
-        private val oldTrails = ArrayList<Pair<Int, ArrayList<Pt>>>() // rastros de dedos já soltos
         private val loc = IntArray(2)
-
-        private fun color(id: Int) = COLORS[id % COLORS.size]
 
         fun update(action: Int, actionId: Int, ids: IntArray, xs: FloatArray, ys: FloatArray) {
             val now = SystemClock.uptimeMillis()
             val idx = ids.indexOf(actionId)
             when (action) {
                 MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN -> {
-                    if (idx >= 0) {
-                        val f = Finger(xs[idx], ys[idx])
-                        f.trail += Pt(xs[idx], ys[idx], now)
-                        held[actionId] = f
-                    }
+                    if (idx >= 0) held[actionId] = Finger(xs[idx], ys[idx])
                 }
                 MotionEvent.ACTION_MOVE -> {
-                    for (i in ids.indices) {
-                        val f = held.getOrPut(ids[i]) { Finger(xs[i], ys[i]) }
-                        f.x = xs[i]; f.y = ys[i]
-                        f.trail += Pt(xs[i], ys[i], now)
-                    }
+                    for (i in ids.indices) held.getOrPut(ids[i]) { Finger(xs[i], ys[i]) }.also { it.x = xs[i]; it.y = ys[i] }
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP -> {
                     val f = held.remove(actionId)
                     val x = f?.x ?: if (idx >= 0) xs[idx] else return
                     val y = f?.y ?: if (idx >= 0) ys[idx] else return
-                    fades += Fade(actionId, x, y, now)
-                    if (f != null && f.trail.size > 1) oldTrails += actionId to f.trail
+                    fades += Fade(x, y, now)
                 }
                 MotionEvent.ACTION_CANCEL -> {
-                    held.forEach { (id, f) ->
-                        fades += Fade(id, f.x, f.y, now)
-                        if (f.trail.size > 1) oldTrails += id to f.trail
-                    }
+                    held.values.forEach { fades += Fade(it.x, it.y, now) }
                     held.clear()
                 }
             }
             postInvalidateOnAnimation()
         }
 
-        private fun drawTrail(c: Canvas, id: Int, trail: ArrayList<Pt>, now: Long) {
-            while (trail.isNotEmpty() && now - trail[0].t > PATH_FADE_MS) trail.removeAt(0)
-            if (trail.size < 2) return
-            paint.strokeWidth = 5f * dp
-            for (k in 1 until trail.size) {
-                val a = trail[k - 1]
-                val b = trail[k]
-                val alpha = (255 * (1f - (now - b.t) / PATH_FADE_MS.toFloat())).toInt().coerceIn(0, 255)
-                paint.color = color(id)
-                paint.alpha = alpha
-                c.drawLine(a.x, a.y, b.x, b.y, paint)
-            }
+        private fun spot(c: Canvas, x: Float, y: Float, a: Float) {
+            disc.shader = RadialGradient(
+                x, y, radius,
+                intArrayOf(argb(a, 0xB8, 255, 255, 255), argb(a, 0x99, 235, 235, 235), argb(a, 0x66, 200, 200, 200)),
+                floatArrayOf(0f, 0.7f, 1f), Shader.TileMode.CLAMP
+            )
+            c.drawCircle(x, y, radius, disc)
+            edge.color = argb(a, 0x66, 150, 150, 150)
+            c.drawCircle(x, y, radius - edge.strokeWidth / 2f, edge)
+            dot.color = argb(a, 0xE6, 255, 255, 255)
+            c.drawCircle(x, y, 3.5f * dp, dot)
         }
+
+        private fun argb(a: Float, alpha: Int, r: Int, g: Int, b: Int) =
+            android.graphics.Color.argb((alpha * a).toInt().coerceIn(0, 255), r, g, b)
 
         override fun onDraw(canvas: Canvas) {
             getLocationOnScreen(loc)
             canvas.translate(-loc[0].toFloat(), -loc[1].toFloat())
             val now = SystemClock.uptimeMillis()
-
-            held.forEach { (id, f) -> drawTrail(canvas, id, f.trail, now) }
-            val ot = oldTrails.iterator()
-            while (ot.hasNext()) {
-                val (id, trail) = ot.next()
-                drawTrail(canvas, id, trail, now)
-                if (trail.size < 2) ot.remove()
-            }
-
-            paint.strokeWidth = 5f * dp
-            held.forEach { (id, f) ->
-                paint.color = color(id)
-                paint.alpha = 255
-                canvas.drawCircle(f.x, f.y, radius, paint)
-            }
+            held.values.forEach { spot(canvas, it.x, it.y, 1f) }
             val it = fades.iterator()
             while (it.hasNext()) {
-                val r = it.next()
-                val t = now - r.start
-                if (t > CIRCLE_FADE_MS) {
-                    it.remove()
-                    continue
-                }
-                paint.color = color(r.id)
-                paint.alpha = 255 - (t * 255 / CIRCLE_FADE_MS).toInt()
-                canvas.drawCircle(r.x, r.y, radius, paint)
+                val f = it.next()
+                val t = (now - f.start) / FADE_MS.toFloat()
+                if (t >= 1f) { it.remove(); continue }
+                spot(canvas, f.x, f.y, 1f - t)
             }
-            if (held.isNotEmpty() || fades.isNotEmpty() || oldTrails.isNotEmpty()) postInvalidateOnAnimation()
+            if (held.isNotEmpty() || fades.isNotEmpty()) postInvalidateOnAnimation()
         }
 
         private companion object {
-            const val PATH_FADE_MS = 200L
-            const val CIRCLE_FADE_MS = 150L
-            // Mesmas 10 cores do Android-Show-Taps.
-            val COLORS = intArrayOf(
-                0xFF8B00FF.toInt(), 0xFF00FF00.toInt(), 0xFFFFA500.toInt(), 0xFFFF0000.toInt(),
-                0xFF0000FF.toInt(), 0xFFFFFF00.toInt(), 0xFF00BFFF.toInt(), 0xFFFF00FF.toInt(),
-                0xFFFF6666.toInt(), 0xFFFFB266.toInt()
-            )
+            const val FADE_MS = 220L
         }
     }
 }

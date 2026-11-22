@@ -18,6 +18,14 @@ android {
     // Assinatura de release é opcional: sem as propriedades, o release sai assinado com a chave debug
     val hasReleaseKey = project.hasProperty("storeFile")
     signingConfigs {
+        // Chave FIXA (app/debug.keystore): todo build sai com a mesma assinatura, então o APK novo
+        // atualiza por cima do antigo sem desinstalar (e sem perder as configurações do app).
+        getByName("debug") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
         if (hasReleaseKey) {
             create("release") {
                 storeFile = file(property("storeFile") as String)
