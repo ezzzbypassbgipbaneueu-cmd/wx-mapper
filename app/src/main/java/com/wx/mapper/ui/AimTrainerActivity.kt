@@ -38,22 +38,28 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import com.wx.mapper.input.WxRuntime
 import com.wx.mapper.ui.theme.WxTheme
 import kotlin.math.roundToInt
 import kotlin.random.Random
 
 /**
  * Treino de mira: tela deitada (paisagem) com uma bolinha vermelha que anda aleatoriamente.
- * Modos: CLICAR (acertar a bolinha) e SEGUIR (manter o cursor em cima dela).
- * Funciona com toque, com o mouse e também com o cursor do WX (os cliques viram toques).
+ * Modos: CLICAR (acertar a bolinha), SEGUIR (manter o cursor em cima dela) e
+ * TELEPORTE (basta passar o cursor por cima: a bolinha teleporta sem precisar clicar).
+ * Funciona com toque, com o mouse e também com o cursor do WX: com o overlay ligado o app
+ * não recebe "mouse passando", então a posição vem direto do cursor virtual (WxRuntime).
  */
 class AimTrainerActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -75,7 +81,7 @@ class AimTrainerActivity : ComponentActivity() {
 
 private enum class TrainerPhase { SETUP, PLAYING, RESULT }
 
-private enum class TrainerMode { CLICK, FOLLOW }
+private enum class TrainerMode { CLICK, FOLLOW, HOVER }
 
 private val TrainerBackground = Color(0xFF101418)
 private val TargetRed = Color(0xFFFF1744)
@@ -190,9 +196,19 @@ private fun BoxScope.SetupPanel(
 
         Text("Modo", color = Color.White)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            ChoiceButton("Clicar na bolinha", mode == TrainerMode.CLICK) { onModeChange(TrainerMode.CLICK) }
-            ChoiceButton("Seguir com o cursor", mode == TrainerMode.FOLLOW) { onModeChange(TrainerMode.FOLLOW) }
+            ChoiceButton("Clicar", mode == TrainerMode.CLICK) { onModeChange(TrainerMode.CLICK) }
+            ChoiceButton("Seguir", mode == TrainerMode.FOLLOW) { onModeChange(TrainerMode.FOLLOW) }
+            ChoiceButton("Teleporte", mode == TrainerMode.HOVER) { onModeChange(TrainerMode.HOVER) }
         }
+        Text(
+            when (mode) {
+                TrainerMode.CLICK -> "Clique em cima da bolinha."
+                TrainerMode.FOLLOW -> "Mantenha o cursor em cima dela o máximo de tempo."
+                TrainerMode.HOVER -> "Passe o cursor por cima: ela teleporta sozinha, sem clicar."
+            },
+            color = Color.White.copy(alpha = 0.7f),
+            fontSize = 13.sp
+        )
 
         Text("Velocidade: ${speedDp.roundToInt()} dp/s", color = Color.White)
         Slider(value = speedDp, onValueChange = onSpeedChange, valueRange = 100f..1500f)
@@ -231,6 +247,7 @@ private fun PlayField(
     onStop: () -> Unit
 ) {
     val density = LocalDensity.current
+    val hostView = LocalView.current
     val radiusPx = with(density) { sizeDp.dp.toPx() } / 2f
     val speedPx = with(density) { speedDp.dp.toPx() }
     val hudPx = with(density) { 64.dp.toPx() }
@@ -239,6 +256,21 @@ private fun PlayField(
     var ball by remember { mutableStateOf(Offset.Zero) }
     var target by remember { mutableStateOf(Offset.Zero) }
     var pointer by remember { mutableStateOf<Offset?>(null) }
+    var fieldCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
+
+    // Posição atual do cursor em coordenadas do campo. Com o overlay do WX ligado vem do cursor
+    // virtual (tela -> campo); senão, do mouse/toque que o próprio Compose recebeu.
+    fun currentPointer(): Offset? {
+        val screen = WxRuntime.overlayCursor()
+        val coords = fieldCoords
+        if (screen != null && coords != null && coords.isAttached) {
+            val loc = IntArray(2)
+            hostView.getLocationOnScreen(loc)
+            val root = coords.positionInRoot()
+            return Offset(screen.x - (loc[0] + root.x), screen.y - (loc[1] + root.y))
+        }
+        return pointer
+    }
 
     fun randomPoint(): Offset {
         val w = fieldSize.width.toFloat()
@@ -251,6 +283,17 @@ private fun PlayField(
             minX + Random.nextFloat() * (maxX - minX),
             minY + Random.nextFloat() * (maxY - minY)
         )
+    }
+
+    // Ponto aleatório que não caia em cima do cursor (senão o teleporte acertaria de novo na hora).
+    fun randomPointAwayFrom(p: Offset?): Offset {
+        var candidate = randomPoint()
+        if (p == null) return candidate
+        repeat(12) {
+            if ((candidate - p).getDistance() >= radiusPx * 3f) return candidate
+            candidate = randomPoint()
+        }
+        return candidate
     }
 
     LaunchedEffect(fieldSize, speedPx, radiusPx, mode, durationSec) {
@@ -278,8 +321,15 @@ private fun PlayField(
                 ball += delta / dist * step
             }
 
-            val p = pointer
+            val p = currentPointer()
             val onTarget = mode == TrainerMode.FOLLOW && p != null && (p - ball).getDistance() <= radiusPx
+            if (mode == TrainerMode.HOVER && p != null && (p - ball).getDistance() <= radiusPx) {
+                // Cursor passou por cima: conta o acerto e teleporta, sem precisar clicar.
+                onHit()
+                ball = randomPointAwayFrom(p)
+                target = randomPoint()
+                turnIn = 0.5f + Random.nextFloat() * 1.2f
+            }
             onTick(dt, onTarget)
             if (durationSec > 0 && total >= durationSec) {
                 onFinish()
@@ -291,7 +341,10 @@ private fun PlayField(
     Box(
         Modifier
             .fillMaxSize()
-            .onSizeChanged { fieldSize = it }
+            .onGloballyPositioned {
+                fieldSize = it.size
+                fieldCoords = it
+            }
             .pointerInput(mode, radiusPx) {
                 awaitPointerEventScope {
                     while (true) {
@@ -326,6 +379,8 @@ private fun PlayField(
         val stat = if (mode == TrainerMode.CLICK) {
             val acc = if (shots == 0) 0 else (hits * 100f / shots).roundToInt()
             "Acertos $hits   Erros $misses   Precisão $acc%"
+        } else if (mode == TrainerMode.HOVER) {
+            "Acertos $hits"
         } else {
             val pct = if (elapsed <= 0f) 0 else (onTargetSeconds * 100f / elapsed).roundToInt()
             "Na bolinha $pct%"
@@ -374,6 +429,12 @@ private fun BoxScope.ResultPanel(
             Text("Acertos: $hits", color = Color.White)
             Text("Erros: $misses", color = Color.White)
             Text("Precisão: $acc%", color = Color.White)
+        } else if (mode == TrainerMode.HOVER) {
+            Text("Acertos: $hits", color = Color.White)
+            if (hits > 0) {
+                val avg = ((elapsed / hits) * 100f).roundToInt() / 100f
+                Text("Tempo médio por acerto: $avg s", color = Color.White)
+            }
         } else {
             val pct = if (elapsed <= 0f) 0 else (onTargetSeconds * 100f / elapsed).roundToInt()
             Text("Tempo na bolinha: $pct%", color = Color.White)

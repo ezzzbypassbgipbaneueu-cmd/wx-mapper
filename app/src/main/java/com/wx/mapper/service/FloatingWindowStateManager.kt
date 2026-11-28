@@ -199,6 +199,11 @@ class FloatingWindowStateManager @Inject constructor(
         lastScreenH = screenHeightPx
         eventHandler.pointerPositionProvider = { pointerOffset.value }
         WxRuntime.attach(eventHandler.wx)
+        WxRuntime.cursorProvider = {
+            // Só vale enquanto o overlay realmente segura o mouse e o cursor é quem se mexe.
+            if (_isBubbleExpanded.value || isTypingMode.value || isShootingMode.value) null
+            else pointerPositionState.value
+        }
         scope.launch {
             isBubbleExpanded.drop(1).collect { isExpanded ->
                 if (isExpanded) return@collect
@@ -678,6 +683,7 @@ class FloatingWindowStateManager @Inject constructor(
         _isBubbleExpanded.value = false
         autoFreeze.releaseNow()
         eventHandler.clear()
+        WxRuntime.cursorProvider = null
         WxRuntime.detach(eventHandler.wx)
         eventHandler.wx.release()
     }
